@@ -210,6 +210,10 @@ bool GeneratorFromO2Kine::Init()
   mSkipNonTrackable = param.skipNonTrackable;
   mContinueMode = param.continueMode;
   mRoundRobin = param.roundRobin;
+  mRandomize = param.randomize;
+  if(mRandomize) {
+    gRandom->SetSeed(mRandomize);
+  }
 
   return true;
 }
@@ -228,6 +232,11 @@ bool GeneratorFromO2Kine::importParticles()
   // NOTE: This should be usable with kinematics files without secondaries
   // It might need some adjustment to make it work with secondaries or to continue
   // from a kinematics snapshot
+
+  // Randomize the order of events in the input file
+  if (mRandomize) {
+    mEventCounter = gRandom->Integer(mEventsAvailable);
+  }
 
   if (mEventCounter < mEventsAvailable) {
     int particlecounter = 0;
