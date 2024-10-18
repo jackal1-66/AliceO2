@@ -211,8 +211,9 @@ bool GeneratorFromO2Kine::Init()
   mContinueMode = param.continueMode;
   mRoundRobin = param.roundRobin;
   mRandomize = param.randomize;
+  mRngSeed = param.rngseed;
   if(mRandomize) {
-    gRandom->SetSeed(mRandomize);
+    gRandom->SetSeed(mRngSeed);
   }
 
   return true;
