@@ -212,6 +212,7 @@ bool GeneratorFromO2Kine::Init()
   mRoundRobin = param.roundRobin;
   mRandomize = param.randomize;
   mRngSeed = param.rngseed;
+  mRandomPhi = param.randomphi;
   if(mRandomize) {
     gRandom->SetSeed(mRngSeed);
   }
@@ -239,6 +240,13 @@ bool GeneratorFromO2Kine::importParticles()
     mEventCounter = gRandom->Integer(mEventsAvailable);
   }
 
+  double dPhi = 0.;
+  // Phi rotation
+  if (mRandomPhi) {
+    dPhi = gRandom->Uniform(2 * TMath::Pi());
+    LOG(info) << "Rotating phi by " << dPhi;
+  }
+
   if (mEventCounter < mEventsAvailable) {
     int particlecounter = 0;
 
@@ -263,6 +271,13 @@ bool GeneratorFromO2Kine::importParticles()
       auto pdg = t.GetPdgCode();
       auto px = t.Px();
       auto py = t.Py();
+      if (mRandomPhi) {
+        auto phi = TMath::ATan2(py, px);
+        auto pt = TMath::Sqrt(px * px + py * py);
+        phi += dPhi;
+        px = pt * TMath::Cos(phi);
+        py = pt * TMath::Sin(phi);
+      }
       auto pz = t.Pz();
       auto vx = t.Vx();
       auto vy = t.Vy();

@@ -97,7 +97,7 @@ class GeneratorFromO2Kine : public o2::eventgen::Generator
   bool mRoundRobin = false;      //! whether we want to take events from file in a round robin fashion
   bool mRandomize = false;       //! whether we want to randomize the order of events in the input file
   unsigned int mRngSeed = 0;     //! randomizer seed, 0 for random value
-
+  bool mRandomPhi = false;       //! whether we want to randomize the phi angle of the particles
   std::unique_ptr<o2::dataformats::MCEventHeader> mOrigMCEventHeader; //! the MC event header of the original file
 
   ClassDefOverride(GeneratorFromO2Kine, 2);
