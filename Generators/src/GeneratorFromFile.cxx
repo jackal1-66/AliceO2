@@ -29,6 +29,13 @@ namespace eventgen
 {
 GeneratorFromFile::GeneratorFromFile(const char* name)
 {
+  if (strncmp(name, "alien:/", 7) == 0) {
+    mAlienInstance = TGrid::Connect("alien");
+    if (!mAlienInstance) {
+      LOG(fatal) << "Could not connect to alien, did you check the alien token?";
+      return;
+    }
+  }
   mEventFile = TFile::Open(name);
   if (mEventFile == nullptr) {
     LOG(fatal) << "EventFile " << name << " not found \n";
@@ -175,6 +182,13 @@ GeneratorFromO2Kine::GeneratorFromO2Kine(const char* name)
   setPositionUnit(1.);
   setTimeUnit(1.);
 
+  if (strncmp(name, "alien:/", 7) == 0) {
+    mAlienInstance = TGrid::Connect("alien");
+    if (!mAlienInstance) {
+      LOG(fatal) << "Could not connect to alien, did you check the alien token?";
+      return;
+    }
+  }
   mEventFile = TFile::Open(name);
   if (mEventFile == nullptr) {
     LOG(fatal) << "EventFile " << name << " not found";
