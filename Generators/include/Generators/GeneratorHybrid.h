@@ -38,7 +38,7 @@ class GeneratorHybrid : public Generator
   GeneratorHybrid() = default;
   GeneratorHybrid(std::vector<std::string> gens);
   ~GeneratorHybrid() = default;
-  
+
   Bool_t Init() override;
   Bool_t generateEvent() override;
   Bool_t importParticles() override;
