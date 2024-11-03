@@ -37,10 +37,13 @@ struct TrackInfoExt {
   float q2ptTPC = 0.f;
   float q2ptITSTPC = 0.f;
   float q2ptITSTPCTRD = 0.f;
-  int nClTPC = 0;
-  int nClITS = 0;
-  int pattITS = 0;
-  ClassDefNV(TrackInfoExt, 1);
+  uint16_t nClTPC = 0;
+  uint8_t pattITS = 0;
+  uint8_t nClITS = 0;
+  uint8_t rowMinTPC = 0;
+  uint8_t rowMaxTPC = 0;
+  uint8_t rowCountTPC = 0;
+  ClassDefNV(TrackInfoExt, 2);
 };
 
 } // namespace dataformats

@@ -131,6 +131,7 @@ class Pdg(Enum):
     kHyperHydrogen4 = 1010010040
     kHyperHelium4 = 1010020040
     kHyperHelium5 = 1010020050
+    kHyperHelium4Sigma = 1110020040
 
 
 dbPdg = ROOT.o2.O2DatabasePDG

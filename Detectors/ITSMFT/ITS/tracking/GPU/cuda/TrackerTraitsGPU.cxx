@@ -21,7 +21,6 @@
 #include "ITStrackingGPU/TrackerTraitsGPU.h"
 #include "ITStrackingGPU/TrackingKernels.h"
 #include "ITStracking/TrackingConfigParam.h"
-
 namespace o2::its
 {
 constexpr int UnusedIndex{-1};
@@ -324,45 +323,62 @@ void TrackerTraitsGPU<nLayers>::computeCellsHybrid(const int iteration)
 template <int nLayers>
 void TrackerTraitsGPU<nLayers>::findCellsNeighboursHybrid(const int iteration)
 {
-  TrackerTraits::findCellsNeighbours(iteration);
-  // for (int iLayer{0}; iLayer < mTrkParams[iteration].CellsPerRoad() - 1; ++iLayer) {
-  //   const int nextLayerCellsNum{static_cast<int>(mTimeFrameGPU->getCells()[iLayer + 1].size())};
-  //   mTimeFrameGPU->getCellsNeighboursLUT()[iLayer].clear();
-  //   mTimeFrameGPU->getCellsNeighboursLUT()[iLayer].resize(nextLayerCellsNum, 0);
-  //   if (mTimeFrameGPU->getCells()[iLayer + 1].empty() ||
-  //       mTimeFrameGPU->getCellsLookupTable()[iLayer].empty()) {
-  //     mTimeFrameGPU->getCellsNeighbours()[iLayer].clear();
-  //     continue;
-  //   }
+  auto& conf = o2::its::ITSGpuTrackingParamConfig::Instance();
+  mTimeFrameGPU->loadCellsDevice();
+  mTimeFrameGPU->loadCellsLUT();
+  std::vector<std::vector<std::pair<int, int>>> cellsNeighboursLayer(mTrkParams[iteration].CellsPerRoad() - 1);
+  for (int iLayer{0}; iLayer < mTrkParams[iteration].CellsPerRoad() - 1; ++iLayer) {
+    const int nextLayerCellsNum{static_cast<int>(mTimeFrameGPU->getCells()[iLayer + 1].size())};
+    mTimeFrameGPU->getCellsNeighboursLUT()[iLayer].clear();
+    mTimeFrameGPU->getCellsNeighboursLUT()[iLayer].resize(nextLayerCellsNum, 0);
 
-  //   int layerCellsNum{static_cast<int>(mTimeFrameGPU->getCells()[iLayer].size())};
-  //   std::vector<std::pair<int, int>> cellsNeighbours;
-  //   cellsNeighbours.reserve(nextLayerCellsNum);
-  //   mTimeFrameGPU->createCellNeighboursDevice(iLayer, cellsNeighbours);
+    if (mTimeFrameGPU->getCells()[iLayer + 1].empty() ||
+        mTimeFrameGPU->getCellsLookupTable()[iLayer].empty()) {
+      mTimeFrameGPU->getCellsNeighbours()[iLayer].clear();
+      continue;
+    }
 
-  //   // // [...]
-  //   // cellNeighboursHandler<true>(mTimeFrameGPU->getDeviceNeighbours(iLayer));
-  //   // //         // Compute Cell Neighbours LUT
-  //   // //         checkGPUError(cub::DeviceScan::ExclusiveSum(mTimeFrameGPU->getChunk(chunkId).getDeviceCUBTmpBuffer(),                       // d_temp_storage
-  //   // //                                                     mTimeFrameGPU->getChunk(chunkId).getTimeFrameGPUParameters()->tmpCUBBufferSize, // temp_storage_bytes
-  //   // //                                                     mTimeFrameGPU->getChunk(chunkId).getDeviceCellNeigboursLookupTables(iLayer),    // d_in
-  //   // //                                                     mTimeFrameGPU->getChunk(chunkId).getDeviceCellNeigboursLookupTables(iLayer),    // d_out
-  //   // //                                                     mTimeFrameGPU->getHostNCells(chunkId)[iLayer + 1],                              // num_items
-  //   // //                                                     mTimeFrameGPU->getStream(chunkId).get()));
+    int layerCellsNum{static_cast<int>(mTimeFrameGPU->getCells()[iLayer].size())};
+    mTimeFrameGPU->createNeighboursLUTDevice(iLayer, nextLayerCellsNum);
+    countCellNeighboursHandler(mTimeFrameGPU->getDeviceArrayCells(),
+                               mTimeFrameGPU->getDeviceNeighboursLUT(iLayer), // LUT is initialised here.
+                               mTimeFrameGPU->getDeviceArrayCellsLUT(),
+                               mTimeFrameGPU->getDeviceNeighbours(iLayer),
+                               mTimeFrameGPU->getDeviceNeighboursIndexTables(iLayer),
+                               mTrkParams[0].MaxChi2ClusterAttachment,
+                               mBz,
+                               iLayer,
+                               layerCellsNum,
+                               nextLayerCellsNum,
+                               1e2,
+                               conf.nBlocks,
+                               conf.nThreads);
+    mTimeFrameGPU->downloadNeighboursLUT(mTimeFrameGPU->getCellsNeighboursLUT()[iLayer], iLayer);
+    // Get the number of found cells from LUT
+    cellsNeighboursLayer[iLayer].resize(mTimeFrameGPU->getCellsNeighboursLUT()[iLayer].back());
+    mTimeFrameGPU->createNeighboursDevice(iLayer, cellsNeighboursLayer[iLayer]);
+    computeCellNeighboursHandler(mTimeFrameGPU->getDeviceArrayCells(),
+                                 mTimeFrameGPU->getDeviceNeighboursLUT(iLayer),
+                                 mTimeFrameGPU->getDeviceArrayCellsLUT(),
+                                 mTimeFrameGPU->getDeviceNeighbours(iLayer),
+                                 mTimeFrameGPU->getDeviceNeighboursIndexTables(iLayer),
+                                 mTrkParams[0].MaxChi2ClusterAttachment,
+                                 mBz,
+                                 iLayer,
+                                 layerCellsNum,
+                                 nextLayerCellsNum,
+                                 1e2,
+                                 conf.nBlocks,
+                                 conf.nThreads);
+    mTimeFrameGPU->getCellsNeighbours()[iLayer].clear();
+    mTimeFrameGPU->getCellsNeighbours()[iLayer].reserve(cellsNeighboursLayer[iLayer].size());
+    mTimeFrameGPU->downloadCellsDevice(iLayer + 1); // Cells on layer 0 did not change.
 
-  //   // cellsNeighboursHandler<false>(mTimeFrameGPU->getDeviceNeighbours(iLayer));
-  //   // // [...]
-
-  //   std::sort(cellsNeighbours.begin(), cellsNeighbours.end(), [](const std::pair<int, int>& a, const std::pair<int, int>& b) {
-  //     return a.second < b.second;
-  //   });
-  //   mTimeFrameGPU->getCellsNeighbours()[iLayer].clear();
-  //   mTimeFrameGPU->getCellsNeighbours()[iLayer].reserve(cellsNeighbours.size());
-  //   for (auto& cellNeighboursIndex : cellsNeighbours) {
-  //     mTimeFrameGPU->getCellsNeighbours()[iLayer].push_back(cellNeighboursIndex.first);
-  //   }
-  //   std::inclusive_scan(mTimeFrameGPU->getCellsNeighboursLUT()[iLayer].begin(), mTimeFrameGPU->getCellsNeighboursLUT()[iLayer].end(), mTimeFrameGPU->getCellsNeighboursLUT()[iLayer].begin());
-  // }
+    filterCellNeighboursHandler(mTimeFrameGPU->getCellsNeighbours()[iLayer],
+                                mTimeFrameGPU->getDeviceNeighbours(iLayer),
+                                cellsNeighboursLayer[iLayer].size());
+  }
+  mTimeFrameGPU->unregisterRest();
 };
 
 template <int nLayers>

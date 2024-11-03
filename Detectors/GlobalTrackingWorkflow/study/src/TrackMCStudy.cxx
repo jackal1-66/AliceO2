@@ -117,6 +117,7 @@ class TrackMCStudy : public Task
   std::shared_ptr<o2::base::GRPGeomRequest> mGGCCDBRequest;
   std::unique_ptr<o2::utils::TreeStreamRedirector> mDBGOut;
   std::vector<float> mTBinClOcc; ///< TPC occupancy histo: i-th entry is the integrated occupancy for ~1 orbit starting from the TB = i*mNTPCOccBinLength
+  std::vector<float> mTBinClOccHist; //< original occupancy
   std::vector<long> mIntBC;      ///< interaction global BC wrt TF start
   std::vector<float> mTPCOcc;    ///< TPC occupancy for this interaction time
   std::vector<int> mITSOcc;      //< N ITS clusters in the ROF containing collision
@@ -620,14 +621,14 @@ void TrackMCStudy::process(const o2::globaltracking::RecoContainer& recoData)
     }
   }
 
+  // collect ITS/TPC cluster info for selected MC particles
+  fillMCClusterInfo(recoData);
+
   // single tracks
   for (auto& entry : mSelMCTracks) {
     auto& trackFam = entry.second;
     (*mDBGOut) << "tracks" << "tr=" << trackFam << "\n";
   }
-
-  // collect ITS/TPC cluster info for selected MC particles
-  fillMCClusterInfo(recoData);
 
   // decays
   std::vector<TrackFamily> decFam;
@@ -735,6 +736,7 @@ void TrackMCStudy::fillMCClusterInfo(const o2::globaltracking::RecoContainer& re
           ncontLb++;
         }
         const auto& clus = TPCClusterIdxStruct.clusters[sector][row][icl0];
+        int tbinH = int(clus.getTime() * mNTPCOccBinLengthInv); // time bin converted to slot of the occ. histo
         clRes.contTracks.clear();
         bool doClusRes = (params.minTPCRefsToExtractClRes > 0) && (params.rejectClustersResStat <= 0. || gRandom->Rndm() < params.rejectClustersResStat);
         for (auto lbl : labels) {
@@ -749,6 +751,9 @@ void TrackMCStudy::fillMCClusterInfo(const o2::globaltracking::RecoContainer& re
           if (row > mctr.maxTPCRow) {
             mctr.maxTPCRow = row;
             mctr.maxTPCRowSect = sector;
+            mctr.nUsedPadRows++;
+          } else if (row == 0 && mctr.nUsedPadRows == 0) {
+            mctr.nUsedPadRows++;
           }
           if (row < mctr.minTPCRow) {
             mctr.minTPCRow = row;
@@ -838,8 +843,18 @@ void TrackMCStudy::fillMCClusterInfo(const o2::globaltracking::RecoContainer& re
           clRes.qtot = clus.getQtot();
           clRes.qmax = clus.getQmax();
           clRes.flags = clus.getFlags();
+          clRes.sigmaTimePacked = clus.sigmaTimePacked;
+          clRes.sigmaPadPacked = clus.sigmaPadPacked;
           clRes.ncont = ncontLb;
           clRes.sortCont();
+
+          if (tbinH < 0) {
+            tbinH = 0;
+          } else if (tbinH >= int(mTBinClOccHist.size())) {
+            tbinH = (int)mTBinClOccHist.size() - 1;
+          }
+          clRes.occBin = mTBinClOccHist[tbinH];
+
           (*mDBGOut) << "clres" << "clr=" << clRes << "\n";
         }
       }
@@ -1147,21 +1162,22 @@ void TrackMCStudy::loadTPCOccMap(const o2::globaltracking::RecoContainer& recoDa
     int nTPCBins = NHBPerTF * o2::constants::lhc::LHCMaxBunches / 8, ninteg = 0;
     int nTPCOccBins = nTPCBins * mNTPCOccBinLengthInv, sumBins = std::max(1, int(o2::constants::lhc::LHCMaxBunches / 8 * mNTPCOccBinLengthInv));
     mTBinClOcc.resize(nTPCOccBins);
-    std::vector<float> mltHistTB(nTPCOccBins);
+    mTBinClOccHist.resize(nTPCOccBins);
     float sm = 0., tb = 0.5 * mNTPCOccBinLength;
     for (int i = 0; i < nTPCOccBins; i++) {
-      mltHistTB[i] = TPCRefitter->getParam()->GetUnscaledMult(tb);
+      mTBinClOccHist[i] = TPCRefitter->getParam()->GetUnscaledMult(tb);
       tb += mNTPCOccBinLength;
     }
     for (int i = nTPCOccBins; i--;) {
-      sm += mltHistTB[i];
+      sm += mTBinClOccHist[i];
       if (i + sumBins < nTPCOccBins) {
-        sm -= mltHistTB[i + sumBins];
+        sm -= mTBinClOccHist[i + sumBins];
       }
       mTBinClOcc[i] = sm;
     }
   } else {
     mTBinClOcc.resize(1);
+    mTBinClOccHist.resize(1);
   }
 }
 

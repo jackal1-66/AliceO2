@@ -45,7 +45,9 @@ struct Options {
   bool printContext = false;
   std::string bcpatternfile;
   int tfid = 0;          // tfid -> used to calculate start orbit for collisions
+  double firstFractionalOrbit; // capture orbit and bunch crossing via decimal number
   uint32_t firstOrbit = 0; // first orbit in run (orbit offset)
+  uint32_t firstBC = 0;    // first bunch crossing (relative to firstOrbit) of the first interaction;
   int orbitsPerTF = 256; // number of orbits per timeframe --> used to calculate start orbit for collisions
   bool useexistingkinematics = false;
   bool noEmptyTF = false; // prevent empty timeframes; the first interaction will be shifted backwards to fall within the range given by Options.orbits
@@ -196,7 +198,7 @@ bool parseOptions(int argc, char* argv[], Options& optvalues)
     "orbitsPerTF", bpo::value<int>(&optvalues.orbitsPerTF)->default_value(256), "Orbits per timeframes")(
     "use-existing-kine", "Read existing kinematics to adjust event counts")(
     "timeframeID", bpo::value<int>(&optvalues.tfid)->default_value(0), "Timeframe id of the first timeframe int this context. Allows to generate contexts for different start orbits")(
-    "first-orbit", bpo::value<uint32_t>(&optvalues.firstOrbit)->default_value(0), "First orbit in the run (HBFUtils.firstOrbit)")(
+    "first-orbit", bpo::value<double>(&optvalues.firstFractionalOrbit)->default_value(0), "First (fractional) orbit in the run (HBFUtils.firstOrbit + BC from decimal)")(
     "maxCollsPerTF", bpo::value<int>(&optvalues.maxCollsPerTF)->default_value(-1), "Maximal number of MC collisions to put into one timeframe. By default no constraint.")(
     "noEmptyTF", bpo::bool_switch(&optvalues.noEmptyTF), "Enforce to have at least one collision")("configKeyValues", bpo::value<std::string>(&optvalues.configKeyValues)->default_value(""), "Semicolon separated key=value strings (e.g.: 'TPC.gasDensity=1;...')")("with-vertices", "Assign vertices to collisions.")("timestamp", bpo::value<long>(&optvalues.timestamp)->default_value(-1L), "Timestamp for CCDB queries / anchoring");
 
@@ -221,6 +223,14 @@ bool parseOptions(int argc, char* argv[], Options& optvalues)
     if (vm.count("with-vertices")) {
       optvalues.genVertices = true;
     }
+
+    // fix the first orbit and bunch crossing
+    // auto orbitbcpair = parseOrbitAndBC(optvalues.firstIRString);
+    optvalues.firstOrbit = (uint32_t)optvalues.firstFractionalOrbit;
+    optvalues.firstBC = (uint32_t)((optvalues.firstFractionalOrbit - 1. * optvalues.firstOrbit) * o2::constants::lhc::LHCMaxBunches);
+    LOG(info) << "First orbit " << optvalues.firstOrbit;
+    LOG(info) << "First BC " << optvalues.firstBC;
+
   } catch (const bpo::error& e) {
     std::cerr << e.what() << "\n\n";
     std::cerr << "Error parsing options; Available options:\n";
@@ -285,7 +295,7 @@ int main(int argc, char* argv[])
       o2::InteractionTimeRecord record;
       // this loop makes sure that the first collision is within the range of orbits asked (if noEmptyTF is enabled)
       do {
-        sampler.setFirstIR(o2::InteractionRecord(0, orbitstart));
+        sampler.setFirstIR(o2::InteractionRecord(options.firstBC, orbitstart));
         sampler.init();
         record = sampler.generateCollisionTime();
       } while (options.noEmptyTF && usetimeframelength && record.orbit >= orbitstart + options.orbits);

@@ -49,6 +49,37 @@ GPUg() void fitTrackSeedsKernel(
   const o2::base::PropagatorF::MatCorrType matCorrType = o2::base::PropagatorF::MatCorrType::USEMatCorrLUT);
 #endif
 } // namespace gpu
+void countCellNeighboursHandler(CellSeed** cellsLayersDevice,
+                                int* neighboursLUTs,
+                                int** cellsLUTs,
+                                gpuPair<int, int>* cellNeighbours,
+                                int* neighboursIndexTable,
+                                const float maxChi2ClusterAttachment,
+                                const float bz,
+                                const int layerIndex,
+                                const unsigned int nCells,
+                                const unsigned int nCellsNext,
+                                const int maxCellNeighbours,
+                                const int nBlocks,
+                                const int nThreads);
+
+void computeCellNeighboursHandler(CellSeed** cellsLayersDevice,
+                                  int* neighboursLUTs,
+                                  int** cellsLUTs,
+                                  gpuPair<int, int>* cellNeighbours,
+                                  int* neighboursIndexTable,
+                                  const float maxChi2ClusterAttachment,
+                                  const float bz,
+                                  const int layerIndex,
+                                  const unsigned int nCells,
+                                  const unsigned int nCellsNext,
+                                  const int maxCellNeighbours,
+                                  const int nBlocks,
+                                  const int nThreads);
+
+void filterCellNeighboursHandler(std::vector<int>&,
+                                 gpuPair<int, int>*,
+                                 unsigned int);
 
 void trackSeedHandler(CellSeed* trackSeeds,
                       const TrackingFrameInfo** foundTrackingFrameInfo,

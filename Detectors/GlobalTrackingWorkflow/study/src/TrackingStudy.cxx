@@ -248,6 +248,28 @@ void TrackingStudySpec::process(o2::globaltracking::RecoContainer& recoData)
   auto vdrit = mTPCVDriftHelper.getVDriftObject().getVDrift();
   bool tpcTrackOK = recoData.isTrackSourceLoaded(GTrackID::TPC);
 
+  auto getTPCClInfo = [&recoData](const o2::tpc::TrackTPC& trc) {
+    const auto clRefs = recoData.getTPCTracksClusterRefs();
+    std::array<int, 3> clinfo = {};
+    if (recoData.inputsTPCclusters) {
+      uint8_t clSect = 0, clRow = 0, clRowP = -1;
+      uint32_t clIdx = 0;
+      for (int ic = 0; ic < trc.getNClusterReferences(); ic++) {
+        trc.getClusterReference(clRefs, ic, clSect, clRow, clIdx);
+        if (clRow != clRowP) {
+          clinfo[2]++;
+          clRowP = clRow;
+        }
+      }
+      const auto clRefs = recoData.getTPCTracksClusterRefs();
+      trc.getClusterReference(clRefs, trc.getNClusterReferences() - 1, clSect, clRow, clIdx);
+      clinfo[0] = clRow;
+      trc.getClusterReference(clRefs, 0, clSect, clRow, clIdx);
+      clinfo[1] = clRow;
+    }
+    return clinfo;
+  };
+
   for (int iv = 0; iv < nv; iv++) {
     LOGP(debug, "processing PV {} of {}", iv, nv);
     const auto& vtref = vtxRefs[iv];
@@ -297,6 +319,7 @@ void TrackingStudySpec::process(o2::globaltracking::RecoContainer& recoData)
         GTrackID tpcTrID;
         const o2::tpc::TrackTPC* tpcTr = nullptr;
         int nclTPC = 0;
+        std::array<int, 3> tpcClInfo{};
         if (dm[DetID::TPC] && tpcTrackOK) {
           tpcTrID = recoData.getTPCContributorGID(vid);
           tpcTr = &recoData.getTPCTrack(tpcTrID);
@@ -304,6 +327,7 @@ void TrackingStudySpec::process(o2::globaltracking::RecoContainer& recoData)
           if (nclTPC < mMinTPCClusters) {
             continue;
           }
+          tpcClInfo = getTPCClInfo(*tpcTr);
         }
         bool ambig = vid.isAmbiguous();
         auto trc = recoData.getTrackParam(vid);
@@ -368,6 +392,9 @@ void TrackingStudySpec::process(o2::globaltracking::RecoContainer& recoData)
           if (gidRefs[GTrackID::TPC].isIndexSet()) {
             trcExt.q2ptTPC = recoData.getTrackParam(gidRefs[GTrackID::TPC]).getQ2Pt();
             trcExt.nClTPC = nclTPC;
+            trcExt.rowMinTPC = tpcClInfo[0];
+            trcExt.rowMaxTPC = tpcClInfo[1];
+            trcExt.rowCountTPC = tpcClInfo[2];
           }
           if (gidRefs[GTrackID::ITSTPC].isIndexSet()) {
             const auto& trTPCITS = recoData.getTPCITSTrack(gidRefs[GTrackID::ITSTPC]);

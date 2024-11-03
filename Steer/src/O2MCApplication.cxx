@@ -303,6 +303,11 @@ void addSpecialParticles()
   //Double Anti-Hyper hydrogen 4
   TVirtualMC::GetMC()->DefineParticle(-1020010040, "DoubleAntiHyperhydrogen4", kPTHadron, 4.106, 1.0, 2.632e-10, "Ion", 0.0, 0, 1, 0, 0, 0, 0, 0, 4, kFALSE);
 
+  // Hyper helium 4 sigma
+  TVirtualMC::GetMC()->DefineParticle(1110020040, "Hyperhelium4sigma", kPTHadron, 3.995, 2.0, 8.018e-11, "Ion", 0.0, 0, 1, 0, 0, 0, 0, 0, 4, kFALSE);
+  // Anti-Hyper helium 4 sigma
+  TVirtualMC::GetMC()->DefineParticle(-1110020040, "AntiHyperhelium4sigma", kPTHadron, 3.995, 2.0, 8.018e-11, "Ion", 0.0, 0, 1, 0, 0, 0, 0, 0, 4, kFALSE);
+
   //Lambda-Neutron
   TVirtualMC::GetMC()->DefineParticle(1010000020, "LambdaNeutron", kPTNeutron, 2.054, 0.0, 2.632e-10, "Hadron", 0.0, 0, 1, 0, 0, 0, 0, 0, 2, kFALSE);
 
@@ -747,6 +752,54 @@ void addSpecialParticles()
   amode42[0][1] = 211;         // positive pion
 
   TVirtualMC::GetMC()->SetDecayMode(-1020010040, abratio42, amode42);
+
+  // Define the 2- and 3-body phase space decay for the Hyper Helium 4 sigma
+  Int_t mode4s[6][3];
+  Float_t bratio4s[6];
+
+  for (Int_t kz = 0; kz < 6; kz++) {
+    bratio4s[kz] = 0.;
+    mode4s[kz][0] = 0;
+    mode4s[kz][1] = 0;
+    mode4s[kz][2] = 0;
+  }
+  bratio4s[0] = 20.;
+  mode4s[0][0] = 1000020040; // Helium4
+  mode4s[0][1] = 111;        // pion0
+  bratio4s[1] = 40.;
+  mode4s[1][0] = 1000010030; // tritium
+  mode4s[1][2] = 2212;       // proton
+  mode4s[1][1] = 111;        // pion0
+  bratio4s[2] = 40.;
+  mode4s[2][0] = 1000010030; // tritium
+  mode4s[2][2] = 2212;       // pion+
+  mode4s[2][1] = 2112;       // neutron
+
+  TVirtualMC::GetMC()->SetDecayMode(1110020040, bratio4s, mode4s);
+
+  // Define the 2- and 3-body phase space decay for the Anti Hyper Helium 4 sigma
+  Int_t amode4s[6][3];
+  Float_t abratio4s[6];
+
+  for (Int_t kz = 0; kz < 6; kz++) {
+    abratio4s[kz] = 0.;
+    amode4s[kz][0] = 0;
+    amode4s[kz][1] = 0;
+    amode4s[kz][2] = 0;
+  }
+  abratio4s[0] = 50.;
+  amode4s[0][0] = -1000020040; // anti-Helium4
+  amode4s[0][1] = 111;         // pion0
+  abratio4s[1] = 50.;
+  amode4s[1][0] = -1000010030; // anti-tritium
+  amode4s[1][2] = -2212;       // anti-proton
+  amode4s[1][1] = 111;         // pion0
+  abratio4s[2] = 50.;
+  amode4s[2][0] = -1000010030; // anti-tritium
+  amode4s[2][2] = -211;        // pion-
+  amode4s[2][1] = -2112;       // anti-neutron
+
+  TVirtualMC::GetMC()->SetDecayMode(-1110020040, abratio4s, amode4s);
 
   // Define the 2-body phase space decay for the Lambda-neutron boundstate
   Int_t mode1[6][3];

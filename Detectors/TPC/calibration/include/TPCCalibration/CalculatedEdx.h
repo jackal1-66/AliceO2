@@ -130,7 +130,7 @@ class CalculatedEdx
   float getMinChargeMaxThreshold() { return mMinChargeMaxThreshold; }
 
   /// fill missing clusters with minimum charge (method=0) or minimum charge/2 (method=1) or Landau (method=2)
-  void fillMissingClusters(int missingClusters[4], float minChargeTot, float minChargeMax, int method);
+  void fillMissingClusters(int missingClusters[4], float minChargeTot, float minChargeMax, int method, std::array<std::vector<float>, 5>& chargeTotROC, std::array<std::vector<float>, 5>& chargeMaxROC);
 
   /// get the truncated mean for the input track with the truncation range, charge type, region and corrections
   /// the cluster charge is normalized by effective length*gain, you can turn off the normalization by setting all corrections to false
@@ -241,9 +241,6 @@ class CalculatedEdx
   bool mDebug{false};                                                  ///< use the debug streamer
   CalibdEdxContainer mCalibCont;                                       ///< calibration container
   std::unique_ptr<o2::utils::TreeStreamRedirector> mStreamer{nullptr}; ///< debug streamer
-
-  std::array<std::vector<float>, 5> mChargeTotROC;
-  std::array<std::vector<float>, 5> mChargeMaxROC;
 
   CorrectdEdxDistortions mSCdEdxCorrection; ///< for space-charge correction of dE/dx
 };

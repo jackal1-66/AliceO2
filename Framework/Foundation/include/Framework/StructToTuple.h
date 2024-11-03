@@ -14,6 +14,17 @@
 #include <Framework/Traits.h>
 #include <array>
 
+namespace
+{
+template <class T, typename... Args>
+decltype(void(T{std::declval<Args>()...}), std::true_type())
+  brace_test(int);
+
+template <class T, typename... Args>
+std::false_type
+  brace_test(...);
+} // namespace
+
 namespace o2::framework
 {
 struct any_type {
@@ -22,15 +33,7 @@ struct any_type {
 };
 
 template <class T, typename... Args>
-decltype(void(T{std::declval<Args>()...}), std::true_type())
-  test(int);
-
-template <class T, typename... Args>
-std::false_type
-  test(...);
-
-template <class T, typename... Args>
-struct is_braces_constructible : decltype(test<T, Args...>(0)) {
+struct is_braces_constructible : decltype(brace_test<T, Args...>(0)) {
 };
 
 #define DPL_REPEAT_0(x)
