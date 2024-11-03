@@ -24,6 +24,8 @@ o2_add_library(Generators
                        src/GeneratorTGenerator.cxx
                        src/GeneratorExternalParam.cxx
                        src/GeneratorFromFile.cxx
+                       src/GeneratorHybrid.cxx
+                       src/GeneratorHybridParam.cxx
                        src/GeneratorFromO2KineParam.cxx
                        src/GeneratorFileOrCmd.cxx
                        src/GeneratorFileOrCmdParam.cxx
@@ -68,6 +70,8 @@ set(headers
     include/Generators/GeneratorTGenerator.h
     include/Generators/GeneratorExternalParam.h
     include/Generators/GeneratorFromFile.h
+    include/Generators/GeneratorHybrid.h
+    include/Generators/GeneratorHybridParam.h
     include/Generators/GeneratorFromO2KineParam.h
     include/Generators/GeneratorFileOrCmd.h
     include/Generators/GeneratorFileOrCmdParam.h

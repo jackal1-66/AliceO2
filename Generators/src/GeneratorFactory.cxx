@@ -18,6 +18,7 @@
 #include <fairlogger/Logger.h>
 #include <SimConfig/SimConfig.h>
 #include <Generators/GeneratorFromFile.h>
+#include <Generators/GeneratorHybrid.h>
 #include <Generators/GeneratorTParticle.h>
 #include <Generators/GeneratorTParticleParam.h>
 #ifdef GENERATORS_WITH_PYTHIA8
@@ -26,6 +27,7 @@
 #endif
 #include <Generators/GeneratorTGenerator.h>
 #include <Generators/GeneratorExternalParam.h>
+#include <Generators/GeneratorHybridParam.h>
 #include "Generators/GeneratorFromO2KineParam.h"
 #ifdef GENERATORS_WITH_HEPMC3
 #include <Generators/GeneratorHepMC.h>
@@ -240,6 +242,19 @@ void GeneratorFactory::setPrimaryGenerator(o2::conf::SimConfig const& conf, Fair
         primGen->AddGenerator(boxGen);
       }
     }
+  } else if (genconfig.compare("hybrid") == 0) { // hybrid using multiple generators
+    LOG(info) << "Init hybrid generator";
+    auto& hybridparam = GeneratorHybridParam::Instance();
+    std::string genslist = hybridparam.Generators;
+    LOG(info) << "Generators list: " << genslist;
+    std::vector<std::string> generators;
+    std::stringstream ss(genslist);
+    std::string item;
+    while (std::getline(ss, item, ',')) {
+      generators.push_back(item);
+    }
+    auto hybrid = new o2::eventgen::GeneratorHybrid(generators);
+    primGen->AddGenerator(hybrid);
   } else {
     LOG(fatal) << "Invalid generator";
   }
