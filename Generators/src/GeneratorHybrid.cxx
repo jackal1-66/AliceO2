@@ -104,14 +104,13 @@ namespace o2
             }
             auto& extgen_filename = params[0];
             auto& extgen_func = params[1];
-            //auto extGen = std::unique_ptr<FairGenerator>(o2::conf::GetFromMacro<FairGenerator*>(extgen_filename, extgen_func, "FairGenerator*", "extgen"));
+            auto extGen = std::unique_ptr<o2::eventgen::Generator>(o2::conf::GetFromMacro<o2::eventgen::Generator*>(extgen_filename, extgen_func, "FairGenerator*", "extgen"));
             if (!extGen) {
               LOG(fatal) << "Failed to load external generator from " << extgen_filename << " with function " << extgen_func;
               exit(1);
             }
-            mExternal.push_back(std::move(extGen));
+            gens.push_back(std::move(extGen));
             mGens.push_back(gen);
-            mExtFlag.push_back(mGens.size() - 1);
           }
         } else{
           LOG(info) << "Generator " << gen << " not found in the list of available generators \n";
@@ -124,7 +123,7 @@ namespace o2
   Bool_t GeneratorHybrid::Init()
   {
     // init all sub-gens
-    int count = 0, countext = 0;
+    int count = 0;
     for (auto& gen : mGens)
     {
       if (gen == "pythia8"){
@@ -148,16 +147,9 @@ namespace o2
         LOG(info) << "Setting \'Pythia8\' base configuration: " << config << std::endl;
         dynamic_cast<o2::eventgen::GeneratorPythia8*>(gens[count].get())->setConfig(config);
       }
-      if (gen == "external"){
-        //mExternal[countext]->Init();
-        addSubGenerator(count + countext, gen);
-        countext++;
-      }
-      else{
-        gens[count]->Init();
-        addSubGenerator(count + countext, gen);
-        count++;
-      }  
+      gens[count]->Init();
+      addSubGenerator(count, gen);
+      count++;  
     }
     return Generator::Init();
   }
@@ -177,15 +169,8 @@ namespace o2
         mIndex = mCurrentFraction;
       }
       LOG(info) << "GeneratorHybrid: generating event with generator " << mGens[mIndex];
-      if (mGens[mIndex] == "external") {
-        //Check in which position of extFlag mIndex is
-        mCurrentExt = std::distance(mExtFlag.begin(), std::find(mExtFlag.begin(), mExtFlag.end(), mIndex));
-        LOG(info) << "GeneratorHybrid: events generated on stack";
-        //mExtStack.getPrimaries()
-      } else {
-        gens[mIndex]->clearParticles(); // clear container of this class
-        gens[mIndex]->generateEvent();
-      }
+      gens[mIndex]->clearParticles(); // clear container of this class
+      gens[mIndex]->generateEvent();
       // notify the sub event generator
       notifySubGenerator(mIndex);
       mseqCounter++;
@@ -195,11 +180,8 @@ namespace o2
   Bool_t GeneratorHybrid::importParticles()
   {
     mParticles.clear(); // clear container of mother class
-    if (mGens[mIndex] == "external") {
-    } else{
-      gens[mIndex]->importParticles();
-      std::copy(gens[mIndex]->getParticles().begin(), gens[mIndex]->getParticles().end(), std::back_insert_iterator(mParticles));
-    }
+    gens[mIndex]->importParticles();
+    std::copy(gens[mIndex]->getParticles().begin(), gens[mIndex]->getParticles().end(), std::back_insert_iterator(mParticles));
 
     // we need to fix particles statuses --> need to enforce this on the importParticles level of individual generators
     for (auto& p : mParticles)
