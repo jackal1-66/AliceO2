@@ -245,7 +245,7 @@ void GeneratorFactory::setPrimaryGenerator(o2::conf::SimConfig const& conf, Fair
   } else if (genconfig.compare("hybrid") == 0) { // hybrid using multiple generators
     LOG(info) << "Init hybrid generator";
     auto& hybridparam = GeneratorHybridParam::Instance();
-    std::string genslist = hybridparam.Generators;
+    std::string genslist = hybridparam.generators;
     LOG(info) << "Generators list: " << genslist;
     std::vector<std::string> generators;
     std::stringstream ss(genslist);

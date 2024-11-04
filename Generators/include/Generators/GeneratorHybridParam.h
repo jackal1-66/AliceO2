@@ -29,10 +29,10 @@ namespace eventgen
  **/
 
 struct GeneratorHybridParam : public o2::conf::ConfigurableParamHelper<GeneratorHybridParam> {
-  std::string Generators = ""; // generators to be used in the cocktail, each divided by a comma
-  std::string Configs = "";    // configurations for the generators, each divided by a colon 
-  bool Randomize = false;      // randomize the order of the generators, if not generator using fractions
-  std::string Fractions = "";  // events fractions for each generator, works only for sequence
+  std::string generators = ""; // generators to be used in the cocktail, each divided by a comma
+  std::string configs = "";    // configurations for the generators, each divided by a colon 
+  bool randomize = false;      // randomize the order of the generators, if not generator using fractions
+  std::string fractions = "";  // events fractions for each generator, works only for sequence
   O2ParamDef(GeneratorHybridParam, "GeneratorHybrid");
 };
 

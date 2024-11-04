@@ -20,8 +20,8 @@ namespace o2
   {
   GeneratorHybrid::GeneratorHybrid(const std::vector<std::string>& inputgens)
   {
-    auto configs = GeneratorHybridParam::Instance().Configs;
-    mRandomize = GeneratorHybridParam::Instance().Randomize;
+    auto configs = GeneratorHybridParam::Instance().configs;
+    mRandomize = GeneratorHybridParam::Instance().randomize;
     std::stringstream ss(configs);
     std::string conf;
     while (std::getline(ss, conf, ':')) {
@@ -37,7 +37,7 @@ namespace o2
     }
     int index = 0;
     if (!mRandomize) {
-      std::string fractions = GeneratorHybridParam::Instance().Fractions;
+      std::string fractions = GeneratorHybridParam::Instance().fractions;
       if(fractions.compare("") == 0){
         for (auto gen : inputgens) {
           mFractions.push_back(1);
