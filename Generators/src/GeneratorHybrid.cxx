@@ -18,7 +18,7 @@ namespace o2
 {
   namespace eventgen
   {
-  GeneratorHybrid::GeneratorHybrid(std::vector<std::string> inputgens)
+  GeneratorHybrid::GeneratorHybrid(const std::vector<std::string>& inputgens)
   {
     auto configs = GeneratorHybridParam::Instance().Configs;
     mRandomize = GeneratorHybridParam::Instance().Randomize;
@@ -88,33 +88,49 @@ namespace o2
             gens.push_back(std::make_unique<o2::eventgen::GeneratorPythia8>());
             mConfsPythia8.push_back(mConfigs[index]);
             mGens.push_back(gen);
-        } else if(gen.compare("extkinO2") == 0){
-          gens.push_back(std::make_unique<o2::eventgen::GeneratorFromO2Kine>(mConfigs[index].c_str()));
-          mGens.push_back(gen);
-        } else if (gen.compare("external") == 0) {
-          if (mConfigs[index].compare("") == 0) {
-            LOG(fatal) << "No configuration provided";
-            exit(1);
-          } else {
-            std::stringstream ss(mConfigs[index]);
-            std::string pars;
-            std::vector<std::string> params;
-            while (std::getline(ss, pars, ',')) {
-              params.push_back(pars);
-            }
-            auto& extgen_filename = params[0];
-            auto& extgen_func = params[1];
-            auto extGen = std::unique_ptr<o2::eventgen::Generator>(o2::conf::GetFromMacro<o2::eventgen::Generator*>(extgen_filename, extgen_func, "FairGenerator*", "extgen"));
-            if (!extGen) {
-              LOG(fatal) << "Failed to load external generator from " << extgen_filename << " with function " << extgen_func;
-              exit(1);
-            }
-            gens.push_back(std::move(extGen));
+        } else if (gen.compare("extkinO2") == 0){
+            gens.push_back(std::make_unique<o2::eventgen::GeneratorFromO2Kine>(mConfigs[index].c_str()));
             mGens.push_back(gen);
-          }
-        } else{
-          LOG(info) << "Generator " << gen << " not found in the list of available generators \n";
-        }
+        } else if (gen.compare("external") == 0) {
+            if (mConfigs[index].compare("") == 0) {
+              LOG(fatal) << "No configuration provided";
+              exit(1);
+            } else {
+              std::stringstream ss(mConfigs[index]);
+              std::string pars;
+              std::vector<std::string> params;
+              while (std::getline(ss, pars, ',')) {
+                params.push_back(pars);
+              }
+              auto& extgen_filename = params[0];
+              auto& extgen_func = params[1];
+              auto extGen = std::unique_ptr<o2::eventgen::Generator>(o2::conf::GetFromMacro<o2::eventgen::Generator*>(extgen_filename, extgen_func, "FairGenerator*", "extgen"));
+              if (!extGen) {
+                LOG(fatal) << "Failed to load external generator from " << extgen_filename << " with function " << extgen_func;
+                exit(1);
+              }
+              gens.push_back(std::move(extGen));
+              mGens.push_back(gen);
+            }
+        } else if (gen.compare("hepmc") == 0) {
+            if (mConfigs[index].compare("") == 0) {
+              LOG(fatal) << "No configuration provided";
+              exit(1);
+            } else {
+                std::stringstream ss(mConfigs[index]);
+                std::string pars;
+                std::vector<std::string> params;
+                while (std::getline(ss, pars, ',')) {
+                  params.push_back(pars);
+                }
+                gens.push_back(std::make_unique<o2::eventgen::GeneratorHepMC>());
+                dynamic_cast<o2::eventgen::GeneratorHepMC*>(gens.back().get())->setFileNames(std::string(params[0]));
+                dynamic_cast<o2::eventgen::GeneratorHepMC*>(gens.back().get())->setVersion(std::stoi(params[1]));
+                mGens.push_back(gen);
+            }
+        } else {
+              LOG(info) << "Generator " << gen << " not found in the list of available generators \n";
+            }
       }
       index++;
     }  

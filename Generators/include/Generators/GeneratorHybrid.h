@@ -17,17 +17,20 @@
 #include "Generators/Generator.h"
 #include "Generators/BoxGenerator.h"
 #include <Generators/GeneratorPythia8.h>
+#include <Generators/GeneratorHepMC.h>
 #include <Generators/GeneratorFromFile.h>
 #include "SimulationDataFormat/MCEventHeader.h"
 #include "SimulationDataFormat/MCGenProperties.h"
 #include "SimulationDataFormat/ParticleStatus.h"
 #include "Generators/GeneratorHybridParam.h"
+#include "Generators/GeneratorHepMCParam.h"
+#include "Generators/GeneratorFileOrCmdParam.h"
 #include "Generators/GeneratorFromO2KineParam.h"
-#include <Generators/GeneratorPythia8.h>
 #include <TRandom3.h>
 #include "CommonUtils/ConfigurationMacroHelper.h"
 #include "FairGenerator.h"
 #include <DetectorsBase/Stack.h>
+#include <SimConfig/SimConfig.h>
 
 namespace o2
 {
@@ -39,7 +42,7 @@ class GeneratorHybrid : public Generator
 
  public:
   GeneratorHybrid() = default;
-  GeneratorHybrid(std::vector<std::string> gens);
+  GeneratorHybrid(const std::vector<std::string>& gens);
   ~GeneratorHybrid() = default;
   
   Bool_t Init() override;

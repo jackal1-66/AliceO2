@@ -83,6 +83,7 @@ class GeneratorHepMC : public Generator, public GeneratorFileOrCmd
 
   /** setters **/
   void setEventsToSkip(uint64_t val) { mEventsToSkip = val; };
+  void setVersion(const int& ver) { mVersion = ver; };
 
  protected:
   /** copy constructor **/
