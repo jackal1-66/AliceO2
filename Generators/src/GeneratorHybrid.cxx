@@ -92,10 +92,6 @@ namespace o2
           gens.push_back(std::make_unique<o2::eventgen::GeneratorFromO2Kine>(mConfigs[index].c_str()));
           mGens.push_back(gen);
         } else if (gen.compare("external") == 0) {
-          if (mExtStack == nullptr) {
-            mExtStack = std::make_unique<o2::data::Stack>();
-            mExtStack->setExternalMode(true);
-          }
           if (mConfigs[index].compare("") == 0) {
             LOG(fatal) << "No configuration provided";
             exit(1);
@@ -108,15 +104,13 @@ namespace o2
             }
             auto& extgen_filename = params[0];
             auto& extgen_func = params[1];
-            auto extGen = std::unique_ptr<FairGenerator>(o2::conf::GetFromMacro<FairGenerator*>(extgen_filename, extgen_func, "FairGenerator*", "extgen"));
+            //auto extGen = std::unique_ptr<FairGenerator>(o2::conf::GetFromMacro<FairGenerator*>(extgen_filename, extgen_func, "FairGenerator*", "extgen"));
             if (!extGen) {
               LOG(fatal) << "Failed to load external generator from " << extgen_filename << " with function " << extgen_func;
               exit(1);
             }
             mExternal.push_back(std::move(extGen));
-            mPrimaryExternal.push_back(std::make_unique<FairPrimaryGenerator>());
             mGens.push_back(gen);
-            mExtEventHeader.push_back(o2::dataformats::MCEventHeader());
             mExtFlag.push_back(mGens.size() - 1);
           }
         } else{
@@ -156,9 +150,6 @@ namespace o2
       }
       if (gen == "external"){
         //mExternal[countext]->Init();
-        mPrimaryExternal[countext]->AddGenerator(mExternal[countext].get());
-        mPrimaryExternal[countext]->Init();
-        mPrimaryExternal[countext]->SetEvent(&mExtEventHeader[countext]);
         addSubGenerator(count + countext, gen);
         countext++;
       }
@@ -189,9 +180,6 @@ namespace o2
       if (mGens[mIndex] == "external") {
         //Check in which position of extFlag mIndex is
         mCurrentExt = std::distance(mExtFlag.begin(), std::find(mExtFlag.begin(), mExtFlag.end(), mIndex));
-        mExtStack->Reset();
-        LOG(info) << "GeneratorHybrid: generating event on stack";
-        mPrimaryExternal[mCurrentExt]->GenerateEvent(mExtStack.get());
         LOG(info) << "GeneratorHybrid: events generated on stack";
         //mExtStack.getPrimaries()
       } else {
@@ -208,8 +196,6 @@ namespace o2
   {
     mParticles.clear(); // clear container of mother class
     if (mGens[mIndex] == "external") {
-      const auto& extstackpart = mExtStack->getPrimaries();
-      std::copy(extstackpart.begin(), extstackpart.end(), std::back_insert_iterator(mParticles));
     } else{
       gens[mIndex]->importParticles();
       std::copy(gens[mIndex]->getParticles().begin(), gens[mIndex]->getParticles().end(), std::back_insert_iterator(mParticles));
