@@ -245,15 +245,18 @@ void GeneratorFactory::setPrimaryGenerator(o2::conf::SimConfig const& conf, Fair
   } else if (genconfig.compare("hybrid") == 0) { // hybrid using multiple generators
     LOG(info) << "Init hybrid generator";
     auto& hybridparam = GeneratorHybridParam::Instance();
-    std::string genslist = hybridparam.generators;
-    LOG(info) << "Generators list: " << genslist;
-    std::vector<std::string> generators;
-    std::stringstream ss(genslist);
-    std::string item;
-    while (std::getline(ss, item, ',')) {
-      generators.push_back(item);
+    std::string config = hybridparam.configFile;
+    //check if config string points to an existing file and not empty
+    if (config.empty()) {
+      LOG(fatal) << "No configuration file provided for hybrid generator";
+      return;
     }
-    auto hybrid = new o2::eventgen::GeneratorHybrid(generators);
+    // check if file named config exists and it's not empty
+    else if (gSystem->AccessPathName(config.c_str())) {
+      LOG(fatal) << "Configuration file for hybrid generator does not exist";
+      return;
+    }
+    auto hybrid = new o2::eventgen::GeneratorHybrid(config);
     primGen->AddGenerator(hybrid);
   } else {
     LOG(fatal) << "Invalid generator";

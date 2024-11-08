@@ -31,6 +31,9 @@
 #include "FairGenerator.h"
 #include <DetectorsBase/Stack.h>
 #include <SimConfig/SimConfig.h>
+#include <rapidjson/document.h>
+#include <rapidjson/error/en.h>
+#include <rapidjson/istreamwrapper.h>
 
 namespace o2
 {
@@ -42,17 +45,20 @@ class GeneratorHybrid : public Generator
 
  public:
   GeneratorHybrid() = default;
-  GeneratorHybrid(const std::vector<std::string>& gens);
+  GeneratorHybrid(const std::string& inputgens);
   ~GeneratorHybrid() = default;
   
   Bool_t Init() override;
   Bool_t generateEvent() override;
   Bool_t importParticles() override;
+  
+  Bool_t parseJSON(const std::string& path);
 
  private:
   o2::eventgen::Generator* currentgen = nullptr;
   std::vector<std::unique_ptr<o2::eventgen::Generator>> gens;
   const std::vector<std::string> generatorNames = {"extkinO2", "boxgen", "external", "hepmc", "pythia8", "pythia8pp", "pythia8hi", "pythia8hf", "pythia8powheg"};
+  std::vector<std::string> mInputGens;
   std::vector<std::string> mGens;
   std::vector<std::string> mConfigs;
   std::vector<std::string> mConfsPythia8;

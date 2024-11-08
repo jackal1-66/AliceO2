@@ -12,60 +12,40 @@
 #include "Generators/GeneratorHybrid.h"
 #include <fairlogger/Logger.h>
 #include <algorithm>
-#include <FairPrimaryGenerator.h>
 
 namespace o2
 {
   namespace eventgen
   {
-  GeneratorHybrid::GeneratorHybrid(const std::vector<std::string>& inputgens)
+  GeneratorHybrid::GeneratorHybrid(const std::string& inputgens)
   {
-    auto configs = GeneratorHybridParam::Instance().configs;
+    if (!parseJSON(inputgens)) {
+      LOG(fatal) << "Failed to parse JSON configuration from input generators";
+      exit(1);
+    }
     mRandomize = GeneratorHybridParam::Instance().randomize;
-    std::stringstream ss(configs);
-    std::string conf;
-    while (std::getline(ss, conf, ':')) {
-      mConfigs.push_back(conf);
-    }
-    if(mConfigs.size() != inputgens.size()){
+    if (mConfigs.size() != mInputGens.size()) {
       LOG(fatal) << "Number of configurations does not match the number of generators";
+      exit(1);
     }
-    if(mConfigs.size() == 0){
-      for(auto gen : inputgens){
+    if (mConfigs.size() == 0){
+      for(auto gen : mInputGens){
         mConfigs.push_back("");
       }
     }
     int index = 0;
     if (!mRandomize) {
-      std::string fractions = GeneratorHybridParam::Instance().fractions;
-      if(fractions.compare("") == 0){
-        for (auto gen : inputgens) {
-          mFractions.push_back(1);
-        }
+      if (mFractions.size() != mInputGens.size()) {
+        LOG(fatal) << "Number of fractions does not match the number of generators";
+        return;
       }
-      else{
-        std::stringstream streamfrac(fractions);
-        std::string frac;
-        while (std::getline(streamfrac, frac, ',')) {
-          if(frac.compare("") == 0)
-            mFractions.push_back(1);
-          else
-            mFractions.push_back(std::stoi(frac));
-        }
-        if(mFractions.size() != inputgens.size()){
-          LOG(fatal) << "Number of fractions does not match the number of generators";
-          return;
-        }
-        // Check if all elements of mFractions are 0
-        if (std::all_of(mFractions.begin(), mFractions.end(), [](int i){ return i == 0; })) {
-          LOG(fatal) << "All fractions provided are 0, no simulation will be performed";
-          return;
-        }
-        
-      }  
+      // Check if all elements of mFractions are 0
+      if (std::all_of(mFractions.begin(), mFractions.end(), [](int i){ return i == 0; })) {
+        LOG(fatal) << "All fractions provided are 0, no simulation will be performed";
+        return;
+      }
     }
-    for(auto gen : inputgens)
-    {
+    for (auto gen : mInputGens) {
       // Search if the generator name is inside generatorNames (which is a vector of strings)
       LOG(info) << "Checking if generator " << gen << " is in the list of available generators \n";
       if (std::find(generatorNames.begin(), generatorNames.end(), gen) != generatorNames.end())
@@ -133,7 +113,7 @@ namespace o2
             }
       }
       index++;
-    }  
+    }
   }
 
   Bool_t GeneratorHybrid::Init()
@@ -208,7 +188,68 @@ namespace o2
     }
 
     return true;
-  }     
+  }
+
+  Bool_t GeneratorHybrid::parseJSON(const std::string& path)
+  {
+    // Parse JSON file to build map
+    std::ifstream fileStream(path, std::ios::in);
+    if (!fileStream.is_open()) {
+      LOG(error) << "Cannot open " << path;
+      return false;
+    }
+    rapidjson::IStreamWrapper isw(fileStream);
+    rapidjson::Document doc;
+    doc.ParseStream(isw);
+    if (doc.HasParseError()) {
+      LOG(error) << "Error parsing provided json file " << path;
+      LOG(error) << "  - Error -> " << rapidjson::GetParseError_En(doc.GetParseError());
+      LOG(error) << "  - Offset -> " << doc.GetErrorOffset();
+      return false;
+    }
+
+    // Put the generator names in mInputGens
+    if (doc.HasMember("generators")) {
+      const auto& gens = doc["generators"];
+      for (const auto& gen : gens.GetArray()) {
+        // push in mInputGens the "name" of the generator
+        mInputGens.push_back(gen["name"].GetString());
+        if (gen.HasMember("config")) {
+          //Check if config is an array
+          if (gen["config"].IsArray()) {
+            std::string config = "";
+            for (const auto& conf : gen["config"].GetArray()) {
+              config += conf.GetString();
+              config += ",";
+            }
+            mConfigs.push_back(config);
+          } else {
+            mConfigs.push_back(gen["config"].GetString());
+          }
+        }
+        else {
+          mConfigs.push_back("");
+        }
+      }
+    }
+
+    // Get fractions and put them in mFractions
+    if (doc.HasMember("fractions")) {
+      const auto& fractions = doc["fractions"];
+      for (const auto& frac : fractions.GetArray()) {
+        mFractions.push_back(frac.GetInt());
+      }
+    } 
+    else {
+      // Set fractions to unity for all generators in case they are not provided
+      const auto& gens = doc["generators"];
+      for (const auto& gen : gens.GetArray()) {
+        mFractions.push_back(1);
+      }
+    }
+
+    return true;
+  }
 
   } // namespace eventgen
 } // namespace o2
