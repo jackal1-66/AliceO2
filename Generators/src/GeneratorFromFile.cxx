@@ -207,11 +207,10 @@ GeneratorFromO2Kine::GeneratorFromO2Kine(const char* name)
   LOG(error) << "Problem reading events from file " << name;
 }
 
-GeneratorFromO2Kine::GeneratorFromO2Kine(O2KineGenConfig const& pars)
+GeneratorFromO2Kine::GeneratorFromO2Kine(O2KineGenConfig const& pars): GeneratorFromO2Kine(pars.fileName.c_str())
 {
   mGlobal = false;
   mConfig = std::make_unique<O2KineGenConfig>(pars);
-  GeneratorFromO2Kine(mConfig->fileName.c_str());
 }
 
 bool GeneratorFromO2Kine::Init()
