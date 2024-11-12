@@ -63,6 +63,29 @@ GeneratorPythia8::GeneratorPythia8() : Generator("ALICEo2", "ALICEo2 Pythia8 Gen
 
 /*****************************************************************/
 
+GeneratorPythia8::GeneratorPythia8(Pythia8GenConfig const& pars) : Generator("ALICEo2", "ALICEo2 Pythia8 Generator")
+{
+  /** constructor **/
+
+  mInterface = reinterpret_cast<void*>(&mPythia);
+  mInterfaceName = "pythia8";
+
+  //LOG(info) << "Instance \'Pythia8\' generator with following parameters";
+  //LOG(info) << pars;
+  LOG(info) << pars.config;
+  LOG(info) << pars.hooksFileName;
+  LOG(info) << pars.hooksFuncName;
+
+  mGenConfig = std::make_unique<Pythia8GenConfig>(pars);
+
+  setConfig(pars.config);
+  setHooksFileName(pars.hooksFileName);
+  setHooksFuncName(pars.hooksFuncName);
+  mGlobalParam = false;
+}
+
+/*****************************************************************/
+
 GeneratorPythia8::GeneratorPythia8(const Char_t* name, const Char_t* title) : Generator(name, title)
 {
   /** constructor **/
@@ -557,7 +580,12 @@ void GeneratorPythia8::pruneEvent(Pythia8::Event& event, Select select)
       }
     }
   }
-  if (GeneratorPythia8Param::Instance().verbose) {
+  int verbose;
+  if(mGlobalParam)
+    verbose = GeneratorPythia8Param::Instance().verbose;
+  else
+    verbose = mGenConfig->verbose;  
+  if (verbose) {
     LOG(info) << "Pythia event was pruned from " << event.size()
               << " to " << pruned.size() << " particles";
   }
@@ -570,7 +598,11 @@ void GeneratorPythia8::initUserFilterCallback()
 {
   mUserFilterFcn = [](Pythia8::Particle const&) -> bool { return true; };
 
-  auto& filter = GeneratorPythia8Param::Instance().particleFilter;
+  std::string filter;
+  if (mGlobalParam) 
+    filter = GeneratorPythia8Param::Instance().particleFilter;
+  else
+    filter = mGenConfig->particleFilter;
   if (filter.size() > 0) {
     LOG(info) << "Initializing the callback for user-based particle pruning " << filter;
     auto expandedFileName = o2::utils::expandShellVarsInFileName(filter);
@@ -599,7 +631,12 @@ Bool_t
   // event record in the AOD.
 
   std::function<bool(const Pythia8::Particle&)> partonSelect = [](const Pythia8::Particle&) { return true; };
-  if (not GeneratorPythia8Param::Instance().includePartonEvent) {
+  bool includeParton;
+  if (mGlobalParam) 
+    includeParton = GeneratorPythia8Param::Instance().includePartonEvent;
+  else
+    includeParton = mGenConfig->includePartonEvent;
+  if (not includeParton) {
 
     // Select pythia particles
     partonSelect = [](const Pythia8::Particle& particle) {

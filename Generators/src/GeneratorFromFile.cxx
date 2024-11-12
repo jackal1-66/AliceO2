@@ -207,19 +207,37 @@ GeneratorFromO2Kine::GeneratorFromO2Kine(const char* name)
   LOG(error) << "Problem reading events from file " << name;
 }
 
+GeneratorFromO2Kine::GeneratorFromO2Kine(O2KineGenConfig const& pars)
+{
+  mGlobal = false;
+  mConfig = std::make_unique<O2KineGenConfig>(pars);
+  GeneratorFromO2Kine(mConfig->fileName.c_str());
+}
+
 bool GeneratorFromO2Kine::Init()
 {
 
   // read and set params
-  auto& param = GeneratorFromO2KineParam::Instance();
-  LOG(info) << "Init \'FromO2Kine\' generator with following parameters";
-  LOG(info) << param;
-  mSkipNonTrackable = param.skipNonTrackable;
-  mContinueMode = param.continueMode;
-  mRoundRobin = param.roundRobin;
-  mRandomize = param.randomize;
-  mRngSeed = param.rngseed;
-  mRandomPhi = param.randomphi;
+
+  if(mGlobal){    
+    auto& param = GeneratorFromO2KineParam::Instance();
+    LOG(info) << "Init \'FromO2Kine\' generator with following parameters";
+    LOG(info) << param;
+    mSkipNonTrackable = param.skipNonTrackable;
+    mContinueMode = param.continueMode;
+    mRoundRobin = param.roundRobin;
+    mRandomize = param.randomize;
+    mRngSeed = param.rngseed;
+    mRandomPhi = param.randomphi;
+  }
+  else{
+    mSkipNonTrackable = mConfig->skipNonTrackable;
+    mContinueMode = mConfig->continueMode;
+    mRoundRobin = mConfig->roundRobin;
+    mRandomize = mConfig->randomize;
+    mRngSeed = mConfig->rngseed;
+    mRandomPhi = mConfig->randomphi;  
+  }
   if (mRandomize) {
     gRandom->SetSeed(mRngSeed);
   }

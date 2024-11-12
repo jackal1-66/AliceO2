@@ -24,6 +24,7 @@
 #include "SimulationDataFormat/ParticleStatus.h"
 #include "Generators/GeneratorHybridParam.h"
 #include "Generators/GeneratorHepMCParam.h"
+#include "Generators/GeneratorPythia8Param.h"
 #include "Generators/GeneratorFileOrCmdParam.h"
 #include "Generators/GeneratorFromO2KineParam.h"
 #include <TRandom3.h>
@@ -34,6 +35,8 @@
 #include <rapidjson/document.h>
 #include <rapidjson/error/en.h>
 #include <rapidjson/istreamwrapper.h>
+#include <rapidjson/writer.h>
+#include "TBufferJSON.h"
 
 namespace o2
 {
@@ -53,6 +56,8 @@ class GeneratorHybrid : public Generator
   Bool_t importParticles() override;
   
   Bool_t parseJSON(const std::string& path);
+  template <typename T>
+  std::string jsonValueToString(const T& value);
 
  private:
   o2::eventgen::Generator* currentgen = nullptr;
@@ -62,6 +67,12 @@ class GeneratorHybrid : public Generator
   std::vector<std::string> mGens;
   std::vector<std::string> mConfigs;
   std::vector<std::string> mConfsPythia8;
+
+  // Parameters configurations
+  std::vector<std::unique_ptr<o2::eventgen::BoxGenConfig>> mBoxGenConfigs;
+  std::vector<std::unique_ptr<o2::eventgen::Pythia8GenConfig>> mPythia8GenConfigs;
+  std::vector<std::unique_ptr<o2::eventgen::O2KineGenConfig>> mO2KineGenConfigs;
+
   bool mRandomize = false;
   std::vector<int> mFractions;
   int mseqCounter = 0;

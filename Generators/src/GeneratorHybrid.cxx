@@ -55,21 +55,26 @@ namespace o2
             if (mConfigs[index].compare("") == 0) {
               gens.push_back(std::make_unique<o2::eventgen::BoxGenerator>());
             } else {
-              std::stringstream ss(mConfigs[index]);
-              std::string pars;
-              std::vector<double> params;
-              while (std::getline(ss, pars, ',')) {
-                params.push_back(std::stod(pars));
-              }
-              gens.push_back(std::make_unique<o2::eventgen::BoxGenerator>(int(params[0]), int(params[1]), params[2], params[3], params[4], params[5], params[6], params[7]));
+              // Get the index of boxgen configuration
+              int confBoxIndex = std::stoi(mConfigs[index].substr(7));
+              gens.push_back(std::make_unique<o2::eventgen::BoxGenerator>(*mBoxGenConfigs[confBoxIndex]));
             }
             mGens.push_back(gen);
         } else if (gen.compare(0, 7, "pythia8") == 0) {
-            gens.push_back(std::make_unique<o2::eventgen::GeneratorPythia8>());
+            // Check if mConfigs[index] contains pythia8_ and a number
+            if (mConfigs[index].compare("") == 0) {
+              gens.push_back(std::make_unique<o2::eventgen::GeneratorPythia8>());
+            }
+            else {
+              // Get the index of pythia8 configuration
+              int confPythia8Index = std::stoi(mConfigs[index].substr(8));
+              gens.push_back(std::make_unique<o2::eventgen::GeneratorPythia8>(*mPythia8GenConfigs[confPythia8Index]));
+            }
             mConfsPythia8.push_back(mConfigs[index]);
             mGens.push_back(gen);
         } else if (gen.compare("extkinO2") == 0){
-            gens.push_back(std::make_unique<o2::eventgen::GeneratorFromO2Kine>(mConfigs[index].c_str()));
+            int confO2KineIndex = std::stoi(mConfigs[index].substr(9));
+            gens.push_back(std::make_unique<o2::eventgen::GeneratorFromO2Kine>(*mO2KineGenConfigs[confO2KineIndex]));
             mGens.push_back(gen);
         } else if (gen.compare("external") == 0) {
             if (mConfigs[index].compare("") == 0) {
@@ -122,11 +127,7 @@ namespace o2
     int count = 0;
     for (auto& gen : mGens)
     {
-      if (gen == "pythia8"){
-        auto config = std::string(std::getenv("O2_ROOT")) + mConfsPythia8[count];
-        LOG(info) << "Setting \'Pythia8\' base configuration: " << config << std::endl;
-        dynamic_cast<o2::eventgen::GeneratorPythia8*>(gens[count].get())->setConfig(config);
-      } else if (gen == "pythia8pp") {
+      if (gen == "pythia8pp") {
         auto config = std::string(std::getenv("O2_ROOT")) + "/share/Generators/egconfig/pythia8_inel.cfg";
         LOG(info) << "Setting \'Pythia8\' base configuration: " << config << std::endl;
         dynamic_cast<o2::eventgen::GeneratorPythia8*>(gens[count].get())->setConfig(config);
@@ -190,6 +191,15 @@ namespace o2
     return true;
   }
 
+  template <typename T>
+  std::string GeneratorHybrid::jsonValueToString(const T& value)
+  {
+    rapidjson::StringBuffer buffer;
+    rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+    value.Accept(writer);
+    return buffer.GetString();
+  }
+
   Bool_t GeneratorHybrid::parseJSON(const std::string& path)
   {
     // Parse JSON file to build map
@@ -213,9 +223,29 @@ namespace o2
       const auto& gens = doc["generators"];
       for (const auto& gen : gens.GetArray()) {
         // push in mInputGens the "name" of the generator
-        mInputGens.push_back(gen["name"].GetString());
+        std::string name = gen["name"].GetString();
+        mInputGens.push_back(name);
         if (gen.HasMember("config")) {
           //Check if config is an array
+          if (name == "boxgen") {
+            const auto& boxconf = gen["config"];
+            auto boxConfig = TBufferJSON::FromJSON<o2::eventgen::BoxGenConfig>(jsonValueToString(boxconf).c_str());
+            mBoxGenConfigs.push_back(std::move(boxConfig));
+            mConfigs.push_back("boxgen_" + std::to_string(mBoxGenConfigs.size() - 1));
+            continue;
+          } else if (name == "pythia8") {
+            const auto& pythia8conf = gen["config"];
+            auto pythia8Config = TBufferJSON::FromJSON<o2::eventgen::Pythia8GenConfig>(jsonValueToString(pythia8conf).c_str());
+            mPythia8GenConfigs.push_back(std::move(pythia8Config));
+            mConfigs.push_back("pythia8_" + std::to_string(mPythia8GenConfigs.size() - 1));
+            continue;
+          } else if (name == "extkinO2") {
+            const auto& o2kineconf = gen["config"];
+            auto o2kineConfig = TBufferJSON::FromJSON<o2::eventgen::O2KineGenConfig>(jsonValueToString(o2kineconf).c_str());
+            mO2KineGenConfigs.push_back(std::move(o2kineConfig));
+            mConfigs.push_back("extkinO2_" + std::to_string(mO2KineGenConfigs.size() - 1));
+            continue;
+          }
           if (gen["config"].IsArray()) {
             std::string config = "";
             for (const auto& conf : gen["config"].GetArray()) {
