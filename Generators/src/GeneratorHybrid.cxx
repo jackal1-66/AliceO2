@@ -77,45 +77,26 @@ namespace o2
             gens.push_back(std::make_unique<o2::eventgen::GeneratorFromO2Kine>(*mO2KineGenConfigs[confO2KineIndex]));
             mGens.push_back(gen);
         } else if (gen.compare("external") == 0) {
-            if (mConfigs[index].compare("") == 0) {
-              LOG(fatal) << "No configuration provided";
+            int confextIndex = std::stoi(mConfigs[index].substr(9));
+            auto& extgen_filename = mExternalGenConfigs[confextIndex]->fileName;
+            auto& extgen_func = mExternalGenConfigs[confextIndex]->funcName;
+            auto extGen = std::unique_ptr<o2::eventgen::Generator>(o2::conf::GetFromMacro<o2::eventgen::Generator*>(extgen_filename, extgen_func, "FairGenerator*", "extgen"));
+            if (!extGen) {
+              LOG(fatal) << "Failed to load external generator from " << extgen_filename << " with function " << extgen_func;
               exit(1);
-            } else {
-              std::stringstream ss(mConfigs[index]);
-              std::string pars;
-              std::vector<std::string> params;
-              while (std::getline(ss, pars, ',')) {
-                params.push_back(pars);
-              }
-              auto& extgen_filename = params[0];
-              auto& extgen_func = params[1];
-              auto extGen = std::unique_ptr<o2::eventgen::Generator>(o2::conf::GetFromMacro<o2::eventgen::Generator*>(extgen_filename, extgen_func, "FairGenerator*", "extgen"));
-              if (!extGen) {
-                LOG(fatal) << "Failed to load external generator from " << extgen_filename << " with function " << extgen_func;
-                exit(1);
-              }
-              gens.push_back(std::move(extGen));
-              mGens.push_back(gen);
             }
+            gens.push_back(std::move(extGen));
+            mGens.push_back(gen);
         } else if (gen.compare("hepmc") == 0) {
-            if (mConfigs[index].compare("") == 0) {
-              LOG(fatal) << "No configuration provided";
-              exit(1);
-            } else {
-                std::stringstream ss(mConfigs[index]);
-                std::string pars;
-                std::vector<std::string> params;
-                while (std::getline(ss, pars, ',')) {
-                  params.push_back(pars);
-                }
-                gens.push_back(std::make_unique<o2::eventgen::GeneratorHepMC>());
-                dynamic_cast<o2::eventgen::GeneratorHepMC*>(gens.back().get())->setFileNames(std::string(params[0]));
-                dynamic_cast<o2::eventgen::GeneratorHepMC*>(gens.back().get())->setVersion(std::stoi(params[1]));
-                mGens.push_back(gen);
-            }
+            int confHepMCIndex = std::stoi(mConfigs[index].substr(6));
+            gens.push_back(std::make_unique<o2::eventgen::GeneratorHepMC>());
+            auto& globalConfig = o2::conf::SimConfig::Instance();
+            dynamic_cast<o2::eventgen::GeneratorHepMC*>(gens.back().get())->setup(*mFileOrCmdGenConfigs[confHepMCIndex], *mHepMCGenConfigs[confHepMCIndex], globalConfig);
+            mGens.push_back(gen);
         } else {
-              LOG(info) << "Generator " << gen << " not found in the list of available generators \n";
-            }
+              LOG(fatal) << "Generator " << gen << " not found in the list of available generators \n";
+              exit(1);
+        }
       }
       index++;
     }
@@ -165,7 +146,10 @@ namespace o2
         }
         mIndex = mCurrentFraction;
       }
-      LOG(info) << "GeneratorHybrid: generating event with generator " << mGens[mIndex];
+      if(mConfigs[mIndex].compare("") == 0)
+        LOG(info) << "GeneratorHybrid: generating event with generator " << mGens[mIndex];
+      else
+        LOG(info) << "GeneratorHybrid: generating event with generator " << mConfigs[mIndex];
       gens[mIndex]->clearParticles(); // clear container of this class
       gens[mIndex]->generateEvent();
       // notify the sub event generator
@@ -214,7 +198,6 @@ namespace o2
     if (doc.HasParseError()) {
       LOG(error) << "Error parsing provided json file " << path;
       LOG(error) << "  - Error -> " << rapidjson::GetParseError_En(doc.GetParseError());
-      LOG(error) << "  - Offset -> " << doc.GetErrorOffset();
       return false;
     }
 
@@ -245,20 +228,33 @@ namespace o2
             mO2KineGenConfigs.push_back(std::move(o2kineConfig));
             mConfigs.push_back("extkinO2_" + std::to_string(mO2KineGenConfigs.size() - 1));
             continue;
-          }
-          if (gen["config"].IsArray()) {
-            std::string config = "";
-            for (const auto& conf : gen["config"].GetArray()) {
-              config += conf.GetString();
-              config += ",";
-            }
-            mConfigs.push_back(config);
+          } else if (name == "external") {
+            const auto& extconf = gen["config"];
+            auto extConfig = TBufferJSON::FromJSON<o2::eventgen::ExternalGenConfig>(jsonValueToString(extconf).c_str());
+            mExternalGenConfigs.push_back(std::move(extConfig));
+            mConfigs.push_back("external_" + std::to_string(mExternalGenConfigs.size() - 1));
+            continue;
+          } else if (name == "hepmc") {
+            const auto& genconf = gen["config"];
+            const auto& cmdconf = genconf["configcmd"];
+            const auto& hepmcconf = genconf["confighepmc"];
+            auto cmdConfig = TBufferJSON::FromJSON<o2::eventgen::FileOrCmdGenConfig>(jsonValueToString(cmdconf).c_str());
+            auto hepmcConfig = TBufferJSON::FromJSON<o2::eventgen::HepMCGenConfig>(jsonValueToString(hepmcconf).c_str());
+            mFileOrCmdGenConfigs.push_back(std::move(cmdConfig));
+            mHepMCGenConfigs.push_back(std::move(hepmcConfig));
+            mConfigs.push_back("hepmc_" + std::to_string(mFileOrCmdGenConfigs.size() - 1));
+            continue;
           } else {
-            mConfigs.push_back(gen["config"].GetString());
+            mConfigs.push_back("");
           }
         }
         else {
-          mConfigs.push_back("");
+          if(name == "boxgen" || name == "pythia8" || name == "extkinO2" || name == "external" || name == "hepmc"){
+            LOG(fatal) << "No configuration provided for generator " << name;
+            return false;
+          }
+          else  
+            mConfigs.push_back("");
         }
       }
     }
@@ -277,7 +273,6 @@ namespace o2
         mFractions.push_back(1);
       }
     }
-
     return true;
   }
 

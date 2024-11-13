@@ -27,6 +27,7 @@
 #include "Generators/GeneratorPythia8Param.h"
 #include "Generators/GeneratorFileOrCmdParam.h"
 #include "Generators/GeneratorFromO2KineParam.h"
+#include "Generators/GeneratorExternalParam.h"
 #include <TRandom3.h>
 #include "CommonUtils/ConfigurationMacroHelper.h"
 #include "FairGenerator.h"
@@ -72,6 +73,9 @@ class GeneratorHybrid : public Generator
   std::vector<std::unique_ptr<o2::eventgen::BoxGenConfig>> mBoxGenConfigs;
   std::vector<std::unique_ptr<o2::eventgen::Pythia8GenConfig>> mPythia8GenConfigs;
   std::vector<std::unique_ptr<o2::eventgen::O2KineGenConfig>> mO2KineGenConfigs;
+  std::vector<std::unique_ptr<o2::eventgen::ExternalGenConfig>> mExternalGenConfigs;
+  std::vector<std::unique_ptr<o2::eventgen::FileOrCmdGenConfig>> mFileOrCmdGenConfigs;
+  std::vector<std::unique_ptr<o2::eventgen::HepMCGenConfig>> mHepMCGenConfigs;
 
   bool mRandomize = false;
   std::vector<int> mFractions;
