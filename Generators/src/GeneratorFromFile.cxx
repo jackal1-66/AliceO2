@@ -218,7 +218,7 @@ bool GeneratorFromO2Kine::Init()
 
   // read and set params
 
-  if(mGlobal){    
+  if(mGlobal){
     auto& param = GeneratorFromO2KineParam::Instance();
     LOG(info) << "Init \'FromO2Kine\' generator with following parameters";
     LOG(info) << param;
@@ -235,7 +235,7 @@ bool GeneratorFromO2Kine::Init()
     mRoundRobin = mConfig->roundRobin;
     mRandomize = mConfig->randomize;
     mRngSeed = mConfig->rngseed;
-    mRandomPhi = mConfig->randomphi;  
+    mRandomPhi = mConfig->randomphi;
   }
   if (mRandomize) {
     gRandom->SetSeed(mRngSeed);

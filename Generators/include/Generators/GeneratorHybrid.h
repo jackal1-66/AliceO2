@@ -51,11 +51,11 @@ class GeneratorHybrid : public Generator
   GeneratorHybrid() = default;
   GeneratorHybrid(const std::string& inputgens);
   ~GeneratorHybrid() = default;
-  
+
   Bool_t Init() override;
   Bool_t generateEvent() override;
   Bool_t importParticles() override;
-  
+
   Bool_t parseJSON(const std::string& path);
   template <typename T>
   std::string jsonValueToString(const T& value);

@@ -52,51 +52,51 @@ namespace o2
       {
         LOG(info) << "Found generator " << gen << " in the list of available generators \n";
         if (gen.compare("boxgen") == 0) {
-            if (mConfigs[index].compare("") == 0) {
-              gens.push_back(std::make_unique<o2::eventgen::BoxGenerator>());
-            } else {
-              // Get the index of boxgen configuration
-              int confBoxIndex = std::stoi(mConfigs[index].substr(7));
-              gens.push_back(std::make_unique<o2::eventgen::BoxGenerator>(*mBoxGenConfigs[confBoxIndex]));
-            }
-            mGens.push_back(gen);
+          if (mConfigs[index].compare("") == 0) {
+            gens.push_back(std::make_unique<o2::eventgen::BoxGenerator>());
+          } else {
+            // Get the index of boxgen configuration
+            int confBoxIndex = std::stoi(mConfigs[index].substr(7));
+            gens.push_back(std::make_unique<o2::eventgen::BoxGenerator>(*mBoxGenConfigs[confBoxIndex]));
+          }
+          mGens.push_back(gen);
         } else if (gen.compare(0, 7, "pythia8") == 0) {
-            // Check if mConfigs[index] contains pythia8_ and a number
-            if (mConfigs[index].compare("") == 0) {
-              gens.push_back(std::make_unique<o2::eventgen::GeneratorPythia8>());
-            }
-            else {
-              // Get the index of pythia8 configuration
-              int confPythia8Index = std::stoi(mConfigs[index].substr(8));
-              gens.push_back(std::make_unique<o2::eventgen::GeneratorPythia8>(*mPythia8GenConfigs[confPythia8Index]));
-            }
-            mConfsPythia8.push_back(mConfigs[index]);
-            mGens.push_back(gen);
+          // Check if mConfigs[index] contains pythia8_ and a number
+          if (mConfigs[index].compare("") == 0) {
+            gens.push_back(std::make_unique<o2::eventgen::GeneratorPythia8>());
+          }
+          else {
+            // Get the index of pythia8 configuration
+            int confPythia8Index = std::stoi(mConfigs[index].substr(8));
+            gens.push_back(std::make_unique<o2::eventgen::GeneratorPythia8>(*mPythia8GenConfigs[confPythia8Index]));
+          }
+          mConfsPythia8.push_back(mConfigs[index]);
+          mGens.push_back(gen);
         } else if (gen.compare("extkinO2") == 0){
-            int confO2KineIndex = std::stoi(mConfigs[index].substr(9));
-            gens.push_back(std::make_unique<o2::eventgen::GeneratorFromO2Kine>(*mO2KineGenConfigs[confO2KineIndex]));
-            mGens.push_back(gen);
+          int confO2KineIndex = std::stoi(mConfigs[index].substr(9));
+          gens.push_back(std::make_unique<o2::eventgen::GeneratorFromO2Kine>(*mO2KineGenConfigs[confO2KineIndex]));
+          mGens.push_back(gen);
         } else if (gen.compare("external") == 0) {
-            int confextIndex = std::stoi(mConfigs[index].substr(9));
-            auto& extgen_filename = mExternalGenConfigs[confextIndex]->fileName;
-            auto& extgen_func = mExternalGenConfigs[confextIndex]->funcName;
-            auto extGen = std::unique_ptr<o2::eventgen::Generator>(o2::conf::GetFromMacro<o2::eventgen::Generator*>(extgen_filename, extgen_func, "FairGenerator*", "extgen"));
-            if (!extGen) {
-              LOG(fatal) << "Failed to load external generator from " << extgen_filename << " with function " << extgen_func;
-              exit(1);
-            }
-            gens.push_back(std::move(extGen));
-            mGens.push_back(gen);
+          int confextIndex = std::stoi(mConfigs[index].substr(9));
+          auto& extgen_filename = mExternalGenConfigs[confextIndex]->fileName;
+          auto& extgen_func = mExternalGenConfigs[confextIndex]->funcName;
+          auto extGen = std::unique_ptr<o2::eventgen::Generator>(o2::conf::GetFromMacro<o2::eventgen::Generator*>(extgen_filename, extgen_func, "FairGenerator*", "extgen"));
+          if (!extGen) {
+            LOG(fatal) << "Failed to load external generator from " << extgen_filename << " with function " << extgen_func;
+            exit(1);
+          }
+          gens.push_back(std::move(extGen));
+          mGens.push_back(gen);
         } else if (gen.compare("hepmc") == 0) {
-            int confHepMCIndex = std::stoi(mConfigs[index].substr(6));
-            gens.push_back(std::make_unique<o2::eventgen::GeneratorHepMC>());
-            auto& globalConfig = o2::conf::SimConfig::Instance();
-            dynamic_cast<o2::eventgen::GeneratorHepMC*>(gens.back().get())->setup(*mFileOrCmdGenConfigs[confHepMCIndex], *mHepMCGenConfigs[confHepMCIndex], globalConfig);
-            mGens.push_back(gen);
-        } else {
-              LOG(fatal) << "Generator " << gen << " not found in the list of available generators \n";
-              exit(1);
+          int confHepMCIndex = std::stoi(mConfigs[index].substr(6));
+          gens.push_back(std::make_unique<o2::eventgen::GeneratorHepMC>());
+          auto& globalConfig = o2::conf::SimConfig::Instance();
+          dynamic_cast<o2::eventgen::GeneratorHepMC*>(gens.back().get())->setup(*mFileOrCmdGenConfigs[confHepMCIndex], *mHepMCGenConfigs[confHepMCIndex], globalConfig);
+          mGens.push_back(gen);
         }
+      } else {
+        LOG(fatal) << "Generator " << gen << " not found in the list of available generators \n";
+        exit(1);
       }
       index++;
     }
@@ -127,7 +127,7 @@ namespace o2
       }
       gens[count]->Init();
       addSubGenerator(count, gen);
-      count++;  
+      count++;
     }
     return Generator::Init();
   }
@@ -156,7 +156,7 @@ namespace o2
       notifySubGenerator(mIndex);
       mseqCounter++;
       return true;
-  }      
+  }
 
   Bool_t GeneratorHybrid::importParticles()
   {
@@ -253,7 +253,7 @@ namespace o2
             LOG(fatal) << "No configuration provided for generator " << name;
             return false;
           }
-          else  
+          else
             mConfigs.push_back("");
         }
       }
@@ -265,7 +265,7 @@ namespace o2
       for (const auto& frac : fractions.GetArray()) {
         mFractions.push_back(frac.GetInt());
       }
-    } 
+    }
     else {
       // Set fractions to unity for all generators in case they are not provided
       const auto& gens = doc["generators"];

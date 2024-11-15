@@ -584,7 +584,7 @@ void GeneratorPythia8::pruneEvent(Pythia8::Event& event, Select select)
   if(mGlobalParam)
     verbose = GeneratorPythia8Param::Instance().verbose;
   else
-    verbose = mGenConfig->verbose;  
+    verbose = mGenConfig->verbose;
   if (verbose) {
     LOG(info) << "Pythia event was pruned from " << event.size()
               << " to " << pruned.size() << " particles";
