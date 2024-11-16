@@ -70,11 +70,10 @@ GeneratorPythia8::GeneratorPythia8(Pythia8GenConfig const& pars) : Generator("AL
   mInterface = reinterpret_cast<void*>(&mPythia);
   mInterfaceName = "pythia8";
 
-  //LOG(info) << "Instance \'Pythia8\' generator with following parameters";
-  //LOG(info) << pars;
-  LOG(info) << pars.config;
-  LOG(info) << pars.hooksFileName;
-  LOG(info) << pars.hooksFuncName;
+  LOG(info) << "Instance \'Pythia8\' generator with following parameters";
+  LOG(info) << "config: " << pars.config;
+  LOG(info) << "hooksFileName: " << pars.hooksFileName;
+  LOG(info) << "hooksFuncName: " << pars.hooksFuncName;
 
   mGenConfig = std::make_unique<Pythia8GenConfig>(pars);
 
@@ -581,7 +580,7 @@ void GeneratorPythia8::pruneEvent(Pythia8::Event& event, Select select)
     }
   }
   int verbose;
-  if(mGlobalParam)
+  if (mGlobalParam)
     verbose = GeneratorPythia8Param::Instance().verbose;
   else
     verbose = mGenConfig->verbose;
@@ -599,7 +598,7 @@ void GeneratorPythia8::initUserFilterCallback()
   mUserFilterFcn = [](Pythia8::Particle const&) -> bool { return true; };
 
   std::string filter;
-  if (mGlobalParam) 
+  if (mGlobalParam)
     filter = GeneratorPythia8Param::Instance().particleFilter;
   else
     filter = mGenConfig->particleFilter;
@@ -632,7 +631,7 @@ Bool_t
 
   std::function<bool(const Pythia8::Particle&)> partonSelect = [](const Pythia8::Particle&) { return true; };
   bool includeParton;
-  if (mGlobalParam) 
+  if (mGlobalParam)
     includeParton = GeneratorPythia8Param::Instance().includePartonEvent;
   else
     includeParton = mGenConfig->includePartonEvent;

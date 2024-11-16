@@ -246,7 +246,7 @@ void GeneratorFactory::setPrimaryGenerator(o2::conf::SimConfig const& conf, Fair
     LOG(info) << "Init hybrid generator";
     auto& hybridparam = GeneratorHybridParam::Instance();
     std::string config = hybridparam.configFile;
-    //check if config string points to an existing file and not empty
+    // check if config string points to an existing and not empty file
     if (config.empty()) {
       LOG(fatal) << "No configuration file provided for hybrid generator";
       return;

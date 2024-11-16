@@ -29,7 +29,7 @@ namespace eventgen
  **/
 
 struct GeneratorHybridParam : public o2::conf::ConfigurableParamHelper<GeneratorHybridParam> {
-  std::string configFile = "";    // JSON configuration file for the generators
+  std::string configFile = ""; // JSON configuration file for the generators
   bool randomize = false;      // randomize the order of the generators, if not generator using fractions
   O2ParamDef(GeneratorHybridParam, "GeneratorHybrid");
 };
