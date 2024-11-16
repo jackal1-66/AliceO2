@@ -143,7 +143,7 @@ Bool_t GeneratorHybrid::generateEvent()
     }
     mIndex = mCurrentFraction;
   }
-  if(mConfigs[mIndex].compare("") == 0)
+  if (mConfigs[mIndex].compare("") == 0)
     LOG(info) << "GeneratorHybrid: generating event with generator " << mGens[mIndex];
   else
     LOG(info) << "GeneratorHybrid: generating event with generator " << mConfigs[mIndex];
@@ -243,7 +243,7 @@ Bool_t GeneratorHybrid::parseJSON(const std::string& path)
           mConfigs.push_back("");
         }
       } else {
-        if(name == "boxgen" || name == "pythia8" || name == "extkinO2" || name == "external" || name == "hepmc") {
+        if (name == "boxgen" || name == "pythia8" || name == "extkinO2" || name == "external" || name == "hepmc") {
           LOG(fatal) << "No configuration provided for generator " << name;
           return false;
         } else
