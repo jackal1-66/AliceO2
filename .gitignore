@@ -69,6 +69,7 @@ CMakeLists.txt.user
 gphysi.dat
 *.root
 *.o2tf
+!run/SimExamples/Hybrid/evtpool.root
 
 # rbenv files
 .ruby-version
