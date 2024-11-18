@@ -102,8 +102,7 @@ class GeneratorFromO2Kine : public o2::eventgen::Generator
   unsigned int mRngSeed = 0;     //! randomizer seed, 0 for random value
   bool mRandomPhi = false;       //! whether we want to randomize the phi angle of the particles
   TGrid* mAlienInstance = nullptr; // a cached connection to TGrid (needed for Alien locations)
-  bool mGlobal = true;             // whether to use the global configuration
-  std::unique_ptr<O2KineGenConfig> mConfig; //! Local configuration of the generator
+  std::unique_ptr<O2KineGenConfig> mConfig; //! Configuration object
 
   std::unique_ptr<o2::dataformats::MCEventHeader> mOrigMCEventHeader; //! the MC event header of the original file
 

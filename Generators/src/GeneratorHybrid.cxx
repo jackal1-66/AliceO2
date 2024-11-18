@@ -62,7 +62,8 @@ GeneratorHybrid::GeneratorHybrid(const std::string& inputgens)
       } else if (gen.compare(0, 7, "pythia8") == 0) {
         // Check if mConfigs[index] contains pythia8_ and a number
         if (mConfigs[index].compare("") == 0) {
-          gens.push_back(std::make_unique<o2::eventgen::GeneratorPythia8>());
+          auto pars = Pythia8GenConfig();
+          gens.push_back(std::make_unique<o2::eventgen::GeneratorPythia8>(pars));
         } else {
           // Get the index of pythia8 configuration
           int confPythia8Index = std::stoi(mConfigs[index].substr(8));
@@ -137,16 +138,18 @@ Bool_t GeneratorHybrid::generateEvent()
     mIndex = gRandom->Integer(mGens.size());
   } else {
     while (mFractions[mCurrentFraction] == 0 || mseqCounter == mFractions[mCurrentFraction]) {
-      if (mFractions[mCurrentFraction] != 0)
+      if (mFractions[mCurrentFraction] != 0) {
         mseqCounter = 0;
+      }
       mCurrentFraction = (mCurrentFraction + 1) % mFractions.size();
     }
     mIndex = mCurrentFraction;
   }
-  if (mConfigs[mIndex].compare("") == 0)
+  if (mConfigs[mIndex].compare("") == 0) {
     LOG(info) << "GeneratorHybrid: generating event with generator " << mGens[mIndex];
-  else
+  } else {
     LOG(info) << "GeneratorHybrid: generating event with generator " << mConfigs[mIndex];
+  }
   gens[mIndex]->clearParticles(); // clear container of this class
   gens[mIndex]->generateEvent();
   // notify the sub event generator
@@ -246,8 +249,9 @@ Bool_t GeneratorHybrid::parseJSON(const std::string& path)
         if (name == "boxgen" || name == "pythia8" || name == "extkinO2" || name == "external" || name == "hepmc") {
           LOG(fatal) << "No configuration provided for generator " << name;
           return false;
-        } else
+        } else {
           mConfigs.push_back("");
+        }
       }
     }
   }
