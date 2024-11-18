@@ -22,8 +22,8 @@
         ],
         "prange": [
           0.1,
-           5
-        ], 
+          5
+        ],
         "phirange": [
           0,
           360
@@ -61,11 +61,11 @@
       "config": {
         "skipNonTrackable": true,
         "continueMode": false,
-        "roundRobin": false, 
-        "randomize": false, 
-        "rngseed": 0, 
-        "randomphi": false, 
-        "fileName": "${PWD}/evtpool.root" 
+        "roundRobin": false,
+        "randomize": false,
+        "rngseed": 0,
+        "randomphi": false,
+        "fileName": "${PWD}/evtpool.root"
       }
     },
     {
@@ -105,9 +105,9 @@
       "name": "pythia8hf",
       "config": ""
     }
-  ],  
+  ],
   "fractions": [
-    1, 
+    1,
     1,
     1,
     1,

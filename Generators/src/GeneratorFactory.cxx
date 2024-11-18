@@ -70,7 +70,7 @@ void GeneratorFactory::setPrimaryGenerator(o2::conf::SimConfig const& conf, Fair
 #ifdef GENERATORS_WITH_PYTHIA8
   auto makePythia8Gen = [](std::string& config) {
     auto& singleton = GeneratorPythia8Param::Instance();
-    auto pars = o2::eventgen::Pythia8GenConfig {
+    auto pars = o2::eventgen::Pythia8GenConfig{
       .config = config.size() > 0 ? config : singleton.config,
       .hooksFileName = singleton.hooksFileName,
       .hooksFuncName = singleton.hooksFuncName,
@@ -162,8 +162,7 @@ void GeneratorFactory::setPrimaryGenerator(o2::conf::SimConfig const& conf, Fair
       .randomize = singleton.randomize,
       .rngseed = singleton.rngseed,
       .randomphi = singleton.randomphi,
-      .fileName = name1.size() > 0 ? name1.c_str() : name2.c_str()
-    };
+      .fileName = name1.size() > 0 ? name1.c_str() : name2.c_str()};
     auto extGen = new o2::eventgen::GeneratorFromO2Kine(pars);
     extGen->SetStartEvent(conf.getStartEvent());
     primGen->AddGenerator(extGen);
