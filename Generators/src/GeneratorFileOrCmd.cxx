@@ -159,7 +159,7 @@ bool GeneratorFileOrCmd::makeTemp(const bool& fromName)
     mTemporary = std::string(buf);
     mFileNames.push_back(mTemporary);
     close(fp);
-  }  
+  }
   return true;
 }
 // -----------------------------------------------------------------
@@ -209,7 +209,7 @@ bool GeneratorFileOrCmd::removeFifo() const
         LOG(info) << "Removed FIFO " << p;
       }
     }
-  }  
+  }
   return true;
 }
 // -----------------------------------------------------------------

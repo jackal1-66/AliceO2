@@ -54,7 +54,7 @@ Bool_t GeneratorTParticle::Init()
   mChain->SetBranchAddress(mBranchName.c_str(), &mTParticles);
 
   if (not mCmd.empty()) {
-    if(mFileNames.empty()) {
+    if (mFileNames.empty()) {
       // Set filename to be a temporary name
       if (not makeTemp(false)) {
         return false;
