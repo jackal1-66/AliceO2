@@ -126,19 +126,40 @@ bool GeneratorFileOrCmd::executeCmdLine(const std::string& cmd) const
   return true;
 }
 // -----------------------------------------------------------------
-bool GeneratorFileOrCmd::makeTemp()
+bool GeneratorFileOrCmd::makeTemp(const bool& fromName)
 {
-  mFileNames.clear();
-  char buf[] = "generatorFifoXXXXXX";
-  auto fp = mkstemp(buf);
-  if (fp < 0) {
-    LOG(fatal) << "Failed to make temporary file: "
-               << std::strerror(errno);
-    return false;
-  }
-  mTemporary = std::string(buf);
-  mFileNames.push_back(mTemporary);
-  close(fp);
+  if (fromName) {
+    if (mFileNames.empty()) {
+      LOG(fatal) << "No file names to make temporary file from";
+      return false;
+    } else if (mFileNames.size() > 1) {
+      LOG(warning) << "More than one file name to make temporary file from";
+      LOG(warning) << "Using the first one: " << mFileNames.front();
+      LOG(warning) << "Removing all the others";
+      mFileNames.erase(++mFileNames.begin(), mFileNames.end());
+    } else {
+      LOG(debug) << "Making temporary file from: " << mFileNames.front();
+    }
+    std::ofstream ofs(mFileNames.front().c_str());
+    if (!ofs) {
+      LOG(fatal) << "Failed to create temporary file: " << mFileNames.front();
+      return false;
+    }
+    mTemporary = std::string(mFileNames.front());
+    ofs.close();
+  } else {
+    mFileNames.clear();
+    char buf[] = "generatorFifoXXXXXX";
+    auto fp = mkstemp(buf);
+    if (fp < 0) {
+      LOG(fatal) << "Failed to make temporary file: "
+                 << std::strerror(errno);
+      return false;
+    }
+    mTemporary = std::string(buf);
+    mFileNames.push_back(mTemporary);
+    close(fp);
+  }  
   return true;
 }
 // -----------------------------------------------------------------
@@ -166,6 +187,29 @@ bool GeneratorFileOrCmd::removeTemp() const
   }
 
   // Ignore errors when removing the temporary file
+  return true;
+}
+// -----------------------------------------------------------------
+bool GeneratorFileOrCmd::removeFifo() const
+{
+  if (mFileNames.empty()) {
+    LOG(warn) << "No FIFO filename available";
+  } else {
+    // Check if FIFO exist and remove it from filesystem
+    std::filesystem::path p(mFileNames.front());
+    if (not std::filesystem::exists(p)) {
+      LOG(warn) << "FIFO " << p << " did not exist";
+    } else {
+      std::error_code ec;
+      std::filesystem::remove(p, ec);
+      if (ec) {
+        LOG(error) << "Error while removing" << p << ": " << ec.message();
+        return false;
+      } else {
+        LOG(info) << "Removed FIFO " << p;
+      }
+    }
+  }  
   return true;
 }
 // -----------------------------------------------------------------

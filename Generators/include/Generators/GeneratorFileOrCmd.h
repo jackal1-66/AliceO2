@@ -141,13 +141,19 @@ struct GeneratorFileOrCmd {
    * @return true if the temporary file name was generated
    * successfully.
    */
-  virtual bool makeTemp();
+  virtual bool makeTemp(const bool&);
   /**
    * Remove the temporary file if it was set and it exists.
    *
    * @return true if the temporary file was removed.
    */
   virtual bool removeTemp() const;
+  /**
+   * Remove the FIFO if it was set and it exists.
+   *
+   * @return true if the FIFO file was removed.
+   */
+  virtual bool removeFifo() const;
   /**
    * Make a fifo at the location of the first element of the list of
    * file names (presumably a temporary file as created by
