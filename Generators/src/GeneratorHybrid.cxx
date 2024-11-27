@@ -127,7 +127,7 @@ Bool_t GeneratorHybrid::Init()
     addSubGenerator(count, gen);
     count++;
   }
-  if(mRandomize) {
+  if (mRandomize) {
     if (std::all_of(mFractions.begin(), mFractions.end(), [](int i) { return i == 1; })) {
       LOG(info) << "Full randomisation of generators order";
     } else {
@@ -163,7 +163,7 @@ Bool_t GeneratorHybrid::generateEvent()
   // Order randomisation or sequence of generators
   // following provided fractions. If not available generators will be used sequentially
   if (mRandomize) {
-    if(mRngFractions.size() != 0) {
+    if (mRngFractions.size() != 0) {
       // Generate number between 0 and 1
       float rnum = gRandom->Rndm();
       // Find generator index
@@ -175,7 +175,7 @@ Bool_t GeneratorHybrid::generateEvent()
       }
     } else {
       mIndex = gRandom->Integer(mGens.size());
-    }  
+    }
   } else {
     while (mFractions[mCurrentFraction] == 0 || mseqCounter == mFractions[mCurrentFraction]) {
       if (mFractions[mCurrentFraction] != 0) {
