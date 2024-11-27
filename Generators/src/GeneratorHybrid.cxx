@@ -127,15 +127,55 @@ Bool_t GeneratorHybrid::Init()
     addSubGenerator(count, gen);
     count++;
   }
+  if(mRandomize) {
+    if (std::all_of(mFractions.begin(), mFractions.end(), [](int i) { return i == 1; })) {
+      LOG(info) << "Full randomisation of generators order";
+    } else {
+      LOG(info) << "Randomisation based on fractions";
+      int allfracs = 0;
+      for (auto& f : mFractions) {
+        allfracs += f;
+      }
+      // Assign new rng fractions
+      float sum = 0;
+      float chance = 0;
+      for (int k = 0; k < mFractions.size(); k++) {
+        if (mFractions[k] == 0) {
+          // Generator will not be used if fraction is 0
+          mRngFractions.push_back(-1);
+          LOG(info) << "Generator " << mGens[k] << " will not be used";
+        } else {
+          chance = static_cast<float>(mFractions[k]) / allfracs;
+          sum += chance;
+          mRngFractions.push_back(sum);
+          LOG(info) << "Generator " << (mConfigs[k] == "" ? mGens[k] : mConfigs[k]) << " has a " << chance * 100 << "% chance of being used";
+        }
+      }
+    }
+  } else {
+    LOG(info) << "Generators will be used in sequence, following provided fractions";
+  }
   return Generator::Init();
 }
 
 Bool_t GeneratorHybrid::generateEvent()
 {
   // Order randomisation or sequence of generators
-  // following provided fractions, if not generators are used in proper sequence
+  // following provided fractions. If not available generators will be used sequentially
   if (mRandomize) {
-    mIndex = gRandom->Integer(mGens.size());
+    if(mRngFractions.size() != 0) {
+      // Generate number between 0 and 1
+      float rnum = gRandom->Rndm();
+      // Find generator index
+      for (int k = 0; k < mRngFractions.size(); k++) {
+        if (rnum <= mRngFractions[k]) {
+          mIndex = k;
+          break;
+        }
+      }
+    } else {
+      mIndex = gRandom->Integer(mGens.size());
+    }  
   } else {
     while (mFractions[mCurrentFraction] == 0 || mseqCounter == mFractions[mCurrentFraction]) {
       if (mFractions[mCurrentFraction] != 0) {

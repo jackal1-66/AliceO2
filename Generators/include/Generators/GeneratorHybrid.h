@@ -79,6 +79,7 @@ class GeneratorHybrid : public Generator
 
   bool mRandomize = false;
   std::vector<int> mFractions;
+  std::vector<float> mRngFractions;
   int mseqCounter = 0;
   int mCurrentFraction = 0;
   int mIndex = 0;
