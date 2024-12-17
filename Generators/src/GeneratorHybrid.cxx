@@ -12,7 +12,7 @@
 #include "Generators/GeneratorHybrid.h"
 #include <fairlogger/Logger.h>
 #include <algorithm>
-
+#include <unordered_set>
 #include <tbb/concurrent_queue.h>
 #include <tbb/task_arena.h>
 #include <tbb/parallel_for.h>
@@ -42,16 +42,23 @@ GeneratorHybrid::GeneratorHybrid(const std::string& inputgens)
   }
   int index = 0;
   if (!(mRandomize || mGenerationMode == GenMode::kParallel)) {
-    if (mFractions.size() != mInputGens.size()) {
-      LOG(fatal) << "Number of fractions does not match the number of generators";
-      return;
+    if(mCocktailMode) {
+      if (mGroups.size() != mFractions.size()) {
+        LOG(fatal) << "Number of groups does not match the number of fractions";
+        return;
+      }
+    } else {
+      if (mFractions.size() != mInputGens.size()) {
+        LOG(fatal) << "Number of fractions does not match the number of generators";
+        return;
+      }
     }
     // Check if all elements of mFractions are 0
     if (std::all_of(mFractions.begin(), mFractions.end(), [](int i) { return i == 0; })) {
       LOG(fatal) << "All fractions provided are 0, no simulation will be performed";
       return;
     }
-  }
+  }  
   for (auto gen : mInputGens) {
     // Search if the generator name is inside generatorNames (which is a vector of strings)
     LOG(info) << "Checking if generator " << gen << " is in the list of available generators \n";
@@ -303,7 +310,7 @@ bool GeneratorHybrid::generateEvent()
           }
         }
       } else {
-        mIndex = gRandom->Integer(mGens.size());
+        mIndex = gRandom->Integer(mFractions.size());
       }
     } else {
       while (mFractions[mCurrentFraction] == 0 || mseqCounter == mFractions[mCurrentFraction]) {
@@ -322,25 +329,47 @@ bool GeneratorHybrid::generateEvent()
 bool GeneratorHybrid::importParticles()
 {
   int genIndex = -1;
+  std::vector<int> subGenIndex = {};
   if (mIndex == -1) {
     // this means parallel mode ---> we have a common queue
     mResultQueue[0].pop(genIndex);
   } else {
     // need to pop from a particular queue
-    mResultQueue[mIndex].pop(genIndex);
+    if(!mCocktailMode){
+      mResultQueue[mIndex].pop(genIndex);
+    } else {
+      // in cocktail mode we need to pop from the group queue
+      subGenIndex.resize(mGroups[mIndex].size());
+      for (size_t pos = 0; pos < mGroups[mIndex].size(); ++pos) {
+        int subIndex = mGroups[mIndex][pos];
+        LOG(info) << "Getting generator " << mGens[subIndex] << " from cocktail group " << mIndex;
+        mResultQueue[subIndex].pop(subGenIndex[pos]);
+      }
+    }
   }
-  LOG(info) << "Importing particles for task " << genIndex;
-
-  // at this moment the mIndex-th generator is ready to be used
+  // Clear particles and event header
   mParticles.clear();
-  mParticles = gens[genIndex]->getParticles();
-
-  // fetch the event Header information from the underlying generator
   mMCEventHeader.clearInfo();
-  gens[genIndex]->updateHeader(&mMCEventHeader);
-
-  mInputTaskQueue.push(genIndex);
-  mTasksStarted++;
+  if (mCocktailMode) {
+    // in cocktail mode we need to merge the particles from the different generators
+    for (auto subIndex : subGenIndex) {
+      LOG(info) << "Importing particles for task " << subIndex;
+      auto subParticles = gens[subIndex]->getParticles();
+      mParticles.insert(mParticles.end(), subParticles.begin(), subParticles.end());
+      // fetch the event Header information from the underlying generator
+      gens[subIndex]->updateHeader(&mMCEventHeader);
+      mInputTaskQueue.push(subIndex);
+      mTasksStarted++;
+    }
+  } else {
+    LOG(info) << "Importing particles for task " << genIndex;
+    // at this moment the mIndex-th generator is ready to be used
+    mParticles = gens[genIndex]->getParticles();
+    // fetch the event Header information from the underlying generator
+    gens[genIndex]->updateHeader(&mMCEventHeader);
+    mInputTaskQueue.push(genIndex);
+    mTasksStarted++;
+  }
 
   mseqCounter++;
   mEventCounter++;
@@ -348,6 +377,7 @@ bool GeneratorHybrid::importParticles()
     LOG(info) << "HybridGen: Stopping TBB task pool";
     mStopFlag = true;
   }
+
   return true;
 }
 
@@ -461,6 +491,63 @@ Bool_t GeneratorHybrid::parseJSON(const std::string& path)
         } else {
           mConfigs.push_back("");
         }
+      }
+    }
+  }
+
+  if (doc.HasMember("cocktail")) {
+    mCocktailMode = true;
+    const auto& groups = doc["cocktail"];
+    for (const auto& group : groups.GetArray()) {
+      if (!group.HasMember("group")) {
+        LOG(fatal) << "Group not provided for cocktail";
+        return false;
+      }
+      const auto& sets = group["group"];
+      mGroups.push_back({});
+      for (const auto& subset : sets.GetArray()) {
+        mGroups.back().push_back(subset.GetInt());
+      }
+      if(group.HasMember("fractions")) {
+        const auto& subfrac = group["fractions"];
+        mCocktailFractions.push_back({});
+        for (const auto& frac : subfrac.GetArray()) {
+          mCocktailFractions.back().push_back(frac.GetInt());
+        }
+        if(mGroups.back().size() != mCocktailFractions.back().size()) {
+          LOG(fatal) << "Number of fractions does not match the number of generators in the cocktail";
+          return false;
+        }
+      } else {
+        LOG(warn) << "Fractions not provided for cocktail group " << mGroups.size()-1 << " setting all fractions to 1";
+        mCocktailFractions.push_back({});
+        for (int i = 0; i < mGroups.back().size(); i++) {
+          mCocktailFractions.back().push_back(1);
+        }
+      }
+    }
+    // Check if mGroups items contain the same number twice and ensure all items are unique across groups
+    std::unordered_set<int> allItems;
+    for (const auto& group : mGroups) {
+      std::unordered_set<int> uniqueItems;
+      for (const auto& item : group) {
+        if (!uniqueItems.insert(item).second) {
+          LOG(fatal) << "Duplicate generator index " << item << " found in a cocktail group";
+          return false;
+        }
+        if (!allItems.insert(item).second) {
+          LOG(fatal) << "Duplicate generator index " << item << " found in the cocktails";
+          return false;
+        }
+      }
+    }
+    // Check if allItems is missing any generator index and create single gen groups for them
+    // Fractions for these generators are the back ones in mFractions
+    for (int i = 0; i < mInputGens.size(); i++) {
+      if (allItems.find(i) == allItems.end()) {
+        LOG(info) << "Generator index " << i << " is missing in the cocktails";
+        LOG(info) << "Setting up a group for generator " << mInputGens[i];
+        mGroups.push_back({i});
       }
     }
   }
