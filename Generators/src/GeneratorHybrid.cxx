@@ -42,7 +42,7 @@ GeneratorHybrid::GeneratorHybrid(const std::string& inputgens)
   }
   int index = 0;
   if (!(mRandomize || mGenerationMode == GenMode::kParallel)) {
-    if(mCocktailMode) {
+    if (mCocktailMode) {
       if (mGroups.size() != mFractions.size()) {
         LOG(fatal) << "Number of groups does not match the number of fractions";
         return;
@@ -58,7 +58,7 @@ GeneratorHybrid::GeneratorHybrid(const std::string& inputgens)
       LOG(fatal) << "All fractions provided are 0, no simulation will be performed";
       return;
     }
-  }  
+  }
   for (auto gen : mInputGens) {
     // Search if the generator name is inside generatorNames (which is a vector of strings)
     LOG(info) << "Checking if generator " << gen << " is in the list of available generators \n";
@@ -335,7 +335,7 @@ bool GeneratorHybrid::importParticles()
     mResultQueue[0].pop(genIndex);
   } else {
     // need to pop from a particular queue
-    if(!mCocktailMode){
+    if (!mCocktailMode) {
       mResultQueue[mIndex].pop(genIndex);
     } else {
       // in cocktail mode we need to pop from the group queue
@@ -508,18 +508,18 @@ Bool_t GeneratorHybrid::parseJSON(const std::string& path)
       for (const auto& subset : sets.GetArray()) {
         mGroups.back().push_back(subset.GetInt());
       }
-      if(group.HasMember("fractions")) {
+      if (group.HasMember("fractions")) {
         const auto& subfrac = group["fractions"];
         mCocktailFractions.push_back({});
         for (const auto& frac : subfrac.GetArray()) {
           mCocktailFractions.back().push_back(frac.GetInt());
         }
-        if(mGroups.back().size() != mCocktailFractions.back().size()) {
+        if (mGroups.back().size() != mCocktailFractions.back().size()) {
           LOG(fatal) << "Number of fractions does not match the number of generators in the cocktail";
           return false;
         }
       } else {
-        LOG(warn) << "Fractions not provided for cocktail group " << mGroups.size()-1 << " setting all fractions to 1";
+        LOG(warn) << "Fractions not provided for cocktail group " << mGroups.size() - 1 << " setting all fractions to 1";
         mCocktailFractions.push_back({});
         for (int i = 0; i < mGroups.back().size(); i++) {
           mCocktailFractions.back().push_back(1);
