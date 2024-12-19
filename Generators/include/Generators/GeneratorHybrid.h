@@ -101,7 +101,7 @@ class GeneratorHybrid : public Generator
   // Cocktail mode
   bool mCocktailMode = false;
   std::vector<std::vector<int>> mGroups;
-  
+
   // Create a task arena with a specified number of threads
   std::thread mTBBTaskPoolRunner;
   tbb::concurrent_bounded_queue<int> mInputTaskQueue;
