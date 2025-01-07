@@ -494,7 +494,7 @@ Bool_t GeneratorHybrid::parseJSON(const std::string& path)
       if (gen.HasMember("cocktail")) {
         mCocktailMode = true;
         for (const auto& subgen : gen["cocktail"].GetArray()) {
-          if(confSetter(subgen)) {
+          if (confSetter(subgen)) {
             mGroups.back().push_back(mInputGens.size() - 1);
           } else {
             return false;
