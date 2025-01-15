@@ -61,6 +61,7 @@ class GeneratorHybrid : public Generator
   Bool_t Init() override;
   Bool_t generateEvent() override;
   Bool_t importParticles() override;
+  Bool_t triggerEvent() override;
   void updateHeader(o2::dataformats::MCEventHeader* eventHeader) override;
 
   void setNEvents(int n) { mNEvents = n; }
@@ -102,6 +103,8 @@ class GeneratorHybrid : public Generator
   // Cocktail mode
   bool mCocktailMode = false;
   std::vector<std::vector<int>> mGroups;
+
+  bool mTriggerFlag = true; // Checks if trigger was provided by JSON
 
   // Create a task arena with a specified number of threads
   std::thread mTBBTaskPoolRunner;

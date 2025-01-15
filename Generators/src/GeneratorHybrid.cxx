@@ -183,6 +183,14 @@ Bool_t GeneratorHybrid::Init()
     }
     gens[count]->Init(); // TODO: move this to multi-threaded
     addSubGenerator(count, gen);
+    // If trigger mode is an unknown value or empty string in the JSON file, it will be set to kTriggerOR
+    // when at least one generator has trigger mode enabled. If the trigger field is not set then trigger is forced OFF
+    if(!mTriggerFlag && gens[count]->getTriggerMode()) {
+      LOG(info) << "Generator " << gen << " has trigger mode enabled to " << gens[count]->getTriggerMode();
+      LOG(info) << "Setting Hybrid trigger mode to OR";
+      setTriggerMode(o2::eventgen::Generator::kTriggerOR);
+      mTriggerFlag = true;
+    }
     count++;
   }
   if (mRandomize) {
@@ -349,6 +357,13 @@ bool GeneratorHybrid::importParticles()
   // Clear particles and event header
   mParticles.clear();
   mMCEventHeader.clearInfo();
+
+  // Clear trigger information of previous generator
+  mInterface = nullptr;
+  mInterfaceName = "";
+  mDeepTriggers.clear();
+  mTriggers.clear();
+
   if (mCocktailMode) {
     // in cocktail mode we need to merge the particles from the different generators
     for (auto subIndex : subGenIndex) {
@@ -357,6 +372,23 @@ bool GeneratorHybrid::importParticles()
       mParticles.insert(mParticles.end(), subParticles.begin(), subParticles.end());
       // fetch the event Header information from the underlying generator
       gens[subIndex]->updateHeader(&mMCEventHeader);
+      // Trigger forwarding to hybrid gen for the event
+      // For cocktail mode only the first generator in the list is used for triggers
+      // TODO: implement trigger merging for cocktail mode
+      if(strcmp(mInterfaceName.c_str(), "") == 0) {
+        if (gens[subIndex]->getTriggers().size() > 0) {
+          for (auto& Trigger : gens[subIndex]->getTriggers()) {
+            addTrigger(Trigger);
+          }
+        }
+        if (gens[subIndex]->getDeepTriggers().size() > 0) {
+          for (auto& deepTrigger : gens[subIndex]->getDeepTriggers()) {
+            addDeepTrigger(deepTrigger);
+          }
+        }
+        mInterface = gens[subIndex]->getInterface();
+        mInterfaceName = gens[subIndex]->getInterfaceName();
+      }
       mInputTaskQueue.push(subIndex);
       mTasksStarted++;
     }
@@ -366,18 +398,42 @@ bool GeneratorHybrid::importParticles()
     mParticles = gens[genIndex]->getParticles();
     // fetch the event Header information from the underlying generator
     gens[genIndex]->updateHeader(&mMCEventHeader);
+    // Trigger forwarding to hybrid gen for the event
+    if (gens[genIndex]->getTriggers().size() > 0) {
+      for (auto& Trigger : gens[genIndex]->getTriggers()) {
+        addTrigger(Trigger);
+      }
+    }
+    if (gens[genIndex]->getDeepTriggers().size() > 0) {
+      for (auto& deepTrigger : gens[genIndex]->getDeepTriggers()) {
+        addDeepTrigger(deepTrigger);
+      }
+    }
+    mInterface = gens[genIndex]->getInterface();
+    mInterfaceName = gens[genIndex]->getInterfaceName();
     mInputTaskQueue.push(genIndex);
     mTasksStarted++;
   }
 
   mseqCounter++;
   mEventCounter++;
+
+  return true;
+}
+
+bool GeneratorHybrid::triggerEvent(){
+  bool triggered = Generator::triggerEvent();
+  if (!triggered) {
+    // counter is decreased when event is rejected, otherwise simulation hangs
+    // when using trigger mechanism. If no trigger is used all events are
+    // automatically accepted
+    mEventCounter--;
+  }
   if (mEventCounter == mNEvents) {
     LOG(info) << "HybridGen: Stopping TBB task pool";
     mStopFlag = true;
   }
-
-  return true;
+  return triggered;
 }
 
 void GeneratorHybrid::updateHeader(o2::dataformats::MCEventHeader* eventHeader)
@@ -482,6 +538,32 @@ Bool_t GeneratorHybrid::parseJSON(const std::string& path)
       // this is mainly for event pool generation or mono-type generators
       mGenerationMode = GenMode::kParallel;
       LOG(info) << "Setting mode to parallel";
+    }
+  }
+
+  // check if there is a trigger field, if not the trigger mode is set to OFF
+  // unless a generator has a trigger mode specified, in this case it will be forced to OR during the initialization
+  // TODO: make the triggering options more versatile
+  if (doc.HasMember("trigger")) {
+    const auto& trigger = doc["trigger"].GetString();
+    if (strcmp(trigger, "or") == 0) {
+      // OR
+      LOG(info) << "Setting trigger mode to OR";
+      setTriggerMode(o2::eventgen::Generator::kTriggerOR);
+    } else if (strcmp(trigger, "and") == 0) {
+      // AND
+      LOG(info) << "Setting trigger mode to AND";
+      setTriggerMode(o2::eventgen::Generator::kTriggerAND);
+    } else if (strcmp(trigger, "off") == 0) {
+      LOG(warn) << "Trigger OFF";
+    } else if (strlen(trigger) == 0) {
+      // OFF by default
+      LOG(warn) << "Trigger mode not specified, turning to OR if gen list has a trigger mode specified";
+      mTriggerFlag = false;
+    } else {
+      // OFF by default
+      LOG(warn) << "Unknown trigger mode, turning to OR if gen list has a trigger mode specified (otherwise OFF)";
+      mTriggerFlag = false;
     }
   }
 
