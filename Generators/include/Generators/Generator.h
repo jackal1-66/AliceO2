@@ -87,7 +87,7 @@ class Generator : public FairGenerator
 
   /** getters **/
   const std::vector<TParticle>& getParticles() const { return mParticles; }; //!
-  void * getInterface() { return mInterface; };
+  void* getInterface() { return mInterface; };
   std::string getInterfaceName() { return mInterfaceName; };
   ETriggerMode_t getTriggerMode() { return mTriggerMode; };
   std::vector<Trigger> getTriggers() { return mTriggers; };

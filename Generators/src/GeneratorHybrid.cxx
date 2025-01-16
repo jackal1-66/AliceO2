@@ -185,7 +185,7 @@ Bool_t GeneratorHybrid::Init()
     addSubGenerator(count, gen);
     // If trigger mode is an unknown value or empty string in the JSON file, it will be set to kTriggerOR
     // when at least one generator has trigger mode enabled. If the trigger field is not set then trigger is forced OFF
-    if(!mTriggerFlag && gens[count]->getTriggerMode()) {
+    if (!mTriggerFlag && gens[count]->getTriggerMode()) {
       LOG(info) << "Generator " << gen << " has trigger mode enabled to " << gens[count]->getTriggerMode();
       LOG(info) << "Setting Hybrid trigger mode to OR";
       setTriggerMode(o2::eventgen::Generator::kTriggerOR);
@@ -375,7 +375,7 @@ bool GeneratorHybrid::importParticles()
       // Trigger forwarding to hybrid gen for the event
       // For cocktail mode only the first generator in the list is used for triggers
       // TODO: implement trigger merging for cocktail mode
-      if(strcmp(mInterfaceName.c_str(), "") == 0) {
+      if (strcmp(mInterfaceName.c_str(), "") == 0) {
         if (gens[subIndex]->getTriggers().size() > 0) {
           for (auto& Trigger : gens[subIndex]->getTriggers()) {
             addTrigger(Trigger);
@@ -421,7 +421,8 @@ bool GeneratorHybrid::importParticles()
   return true;
 }
 
-bool GeneratorHybrid::triggerEvent(){
+bool GeneratorHybrid::triggerEvent()
+{
   bool triggered = Generator::triggerEvent();
   if (!triggered) {
     // counter is decreased when event is rejected, otherwise simulation hangs
