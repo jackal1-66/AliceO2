@@ -16,6 +16,7 @@
 
 #include "Generators/Generator.h"
 #include "Pythia8/Pythia.h"
+#include "Pythia8Plugins/HepMC3.h"
 #include <functional>
 #include "Generators/GeneratorPythia8Param.h"
 
@@ -286,6 +287,9 @@ class GeneratorPythia8 : public Generator
                                // will be transported to Pythia in the Init function through the Pythia::readString("Random:seed") mechanism.
                                // Value of -1 means unitialized; 0 will be time-dependent and values >1 <= MAX_SEED concrete reproducible seeding
   Pythia8GenConfig mGenConfig; // configuration object
+
+  // HepMC writing
+  std::unique_ptr<Pythia8::Pythia8ToHepMC> mToHepMC;
 
   static std::atomic<int> Pythia8InstanceCounter;
   int mThisPythia8InstanceID = 0;

@@ -79,6 +79,8 @@ void GeneratorFactory::setPrimaryGenerator(o2::conf::SimConfig const& conf, Fair
       .includePartonEvent = singleton.includePartonEvent,
       .particleFilter = singleton.particleFilter,
       .verbose = singleton.verbose,
+      .hepmcWrite = singleton.hepmcWrite,
+      .hepmcFileName = singleton.hepmcFileName
     };
     auto gen = new o2::eventgen::GeneratorPythia8(pars);
     if (!config.empty()) {

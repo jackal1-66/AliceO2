@@ -34,6 +34,8 @@ struct Pythia8GenConfig {
   bool includePartonEvent = false; // whether to keep the event before hadronization
   std::string particleFilter = ""; // user particle filter
   int verbose = 0;                 // verbose control (if > 0 may show more info messages about what is going on)
+  bool hepmcWrite = false;           // if true, write the events to a HepMC3 file
+  std::string hepmcFileName = "";  // name of the HepMC3 file to write
 };
 
 // construct a configurable param singleton out of the Pythia8GenConfig struct

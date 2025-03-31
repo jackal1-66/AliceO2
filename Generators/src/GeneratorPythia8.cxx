@@ -72,6 +72,16 @@ GeneratorPythia8::GeneratorPythia8(Pythia8GenConfig const& config) : Generator("
 
   mGenConfig = config;
 
+  // HepMC initialisation
+  if(mGenConfig.hepmcWrite) {
+    mToHepMC = std::make_unique<Pythia8::Pythia8ToHepMC>();
+    if (mGenConfig.hepmcFileName.empty()) {
+      mGenConfig.hepmcFileName = "pythia8.hepmc";
+    }
+    LOG(info) << "HepMC3 output enabled, writing to file: " << mGenConfig.hepmcFileName;
+    mToHepMC->setNewFile(mGenConfig.hepmcFileName);
+  }
+
   setConfig(mGenConfig.config);
   setHooksFileName(mGenConfig.hooksFileName);
   setHooksFuncName(mGenConfig.hooksFuncName);
@@ -644,6 +654,11 @@ Bool_t
   if (mApplyPruning) {
     auto finalSelect = [partonSelect, this](const Pythia8::Particle& p) { return partonSelect(p) && mUserFilterFcn(p); };
     pruneEvent(event, finalSelect);
+  }
+
+  if(mGenConfig.hepmcWrite) {
+    // Write the event to HepMC
+    mToHepMC->writeNextEvent(mPythia);
   }
 
   /* loop over particles */
