@@ -28,7 +28,7 @@ namespace eventgen
  ** allow the user to modify them
  **/
 struct GenTPCLoopersParam : public o2::conf::ConfigurableParamHelper<GenTPCLoopersParam> {
-  bool loopersVeto = false;                                                                       // if true, no loopers are generated
+  bool loopersVeto = false; // if true, no loopers are generated
   // Current files are set to custom user CCDB paths, TO BE CHANGED
   std::string model_pairs = "ccdb://Users/m/mgiacalo/WGAN_ExtGenPair";                            // ONNX model for e+e- pair production
   std::string model_compton = "ccdb://Users/m/mgiacalo/WGAN_ExtGenCompton";                       // ONNX model for Compton scattering
