@@ -93,6 +93,10 @@ void GeneratorFactory::setPrimaryGenerator(o2::conf::SimConfig const& conf, Fair
 
   o2::O2DatabasePDG::addALICEParticles(TDatabasePDG::Instance());
   auto genconfig = conf.getGenerator();
+  if (GeneratorHybridParam::Instance().switchExtToHybrid && (genconfig.compare("external") == 0 || genconfig.compare("extgen") == 0)) {
+    LOG(info) << "Switching external generator to hybrid mode";
+    genconfig = "hybrid";
+  }
   LOG(info) << "** Generator to use: '" << genconfig << "'";
   if (genconfig.compare("boxgen") == 0) {
     // a simple "box" generator configurable via BoxGunparam
