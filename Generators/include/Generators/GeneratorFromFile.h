@@ -91,7 +91,6 @@ class GeneratorFromO2Kine : public o2::eventgen::Generator
   void updateHeader(o2::dataformats::MCEventHeader* eventHeader) override;
 
  private:
-
   TFile* mEventFile = nullptr;     //! the file containing the persistent events
   TBranch* mEventBranch = nullptr; //! the branch containing the persistent events
   TBranch* mMCHeaderBranch = nullptr; //! branch containing MC event headers
