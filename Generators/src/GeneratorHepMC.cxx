@@ -435,16 +435,10 @@ void GeneratorHepMC::updateHeader(o2::dataformats::MCEventHeader* eventHeader)
       if (version == "v0") {
         auto hi = std::make_shared<HepMC3::GenHeavyIon>();
         double spectNeutrons, spectProtons, eccentricity, userCentEst;
-        is >> hi->Ncoll_hard >> hi->Npart_proj >> hi->Npart_targ >> hi->Ncoll
-           >> spectNeutrons >> spectProtons  // deprecated v0 fields
-           >> hi->N_Nwounded_collisions >> hi->Nwounded_N_collisions
-           >> hi->Nwounded_Nwounded_collisions
-           >> hi->impact_parameter >> hi->event_plane_angle
-           >> eccentricity  // deprecated v0 field
-           >> hi->sigma_inel_NN >> hi->centrality
-           >> userCentEst   // GenHeavyIon::to_string always writes this, but GenHeavyIon::from_string skips it for v0 (HepMC3 bug to fix)
-           >> hi->Nspec_proj_n >> hi->Nspec_targ_n
-           >> hi->Nspec_proj_p >> hi->Nspec_targ_p;
+        is >> hi->Ncoll_hard >> hi->Npart_proj >> hi->Npart_targ >> hi->Ncoll >> spectNeutrons >> spectProtons                                                           // deprecated v0 fields
+          >> hi->N_Nwounded_collisions >> hi->Nwounded_N_collisions >> hi->Nwounded_Nwounded_collisions >> hi->impact_parameter >> hi->event_plane_angle >> eccentricity // deprecated v0 field
+          >> hi->sigma_inel_NN >> hi->centrality >> userCentEst                                                                                                          // GenHeavyIon::to_string always writes this, but GenHeavyIon::from_string skips it for v0 (HepMC3 bug to fix)
+          >> hi->Nspec_proj_n >> hi->Nspec_targ_n >> hi->Nspec_proj_p >> hi->Nspec_targ_p;
         if (!is.fail()) {
           LOG(debug) << "GenHeavyIon: using manual v0 parser (workaround for HepMC3 from_string bug)";
           hiInfo = hi;
@@ -494,7 +488,7 @@ void GeneratorHepMC::updateHeader(o2::dataformats::MCEventHeader* eventHeader)
   if (hiInfo) {
     eventHeader->SetB(hiInfo->impact_parameter); // sets the impact parameter to the FairMCEventHeader field for quick access in the AO2D
     eventHeader->putInfo<float>(Key::impactParameter,
-                              hiInfo->impact_parameter);
+                                hiInfo->impact_parameter);
     eventHeader->putInfo<int>(Key::nPart,
                               hiInfo->Npart_proj + hiInfo->Npart_targ);
     eventHeader->putInfo<int>(Key::nPartProjectile, hiInfo->Npart_proj);
