@@ -87,10 +87,10 @@ class GeneratorFromO2Kine : public o2::eventgen::Generator
   void SetStartEvent(int start);
 
   void setContinueMode(bool val) { mContinueMode = val; };
-
- private:
   /** methods that can be overridden **/
   void updateHeader(o2::dataformats::MCEventHeader* eventHeader) override;
+
+ private:
 
   TFile* mEventFile = nullptr;     //! the file containing the persistent events
   TBranch* mEventBranch = nullptr; //! the branch containing the persistent events
@@ -141,6 +141,11 @@ class GeneratorFromEventPool : public o2::eventgen::Generator
     mParticles = mO2KineGenerator->getParticles();
 
     return import_good;
+  }
+
+  void updateHeader(o2::dataformats::MCEventHeader* eventHeader) override
+  {
+    mO2KineGenerator->updateHeader(eventHeader);
   }
 
   // determine the collection of available files
