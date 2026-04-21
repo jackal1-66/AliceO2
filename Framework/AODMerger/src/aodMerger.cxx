@@ -28,6 +28,14 @@
 
 #include "aodMerger.h"
 #include <cinttypes>
+#include <atomic>
+#include <future>
+#include <string>
+#include <vector>
+#include <thread>
+#include <tbb/task_arena.h>
+#include <tbb/task_group.h>
+#include <ROOT/RTaskArena.hxx>
 
 // AOD merger with correct index rewriting
 // No need to know the datamodel because the branch names follow a canonical standard (identified by fIndex)
@@ -43,6 +51,8 @@ int main(int argc, char* argv[])
   int exitCode = 0; // 0: success, >0: failure
   int compression = 505;
 
+  int nWorkers = 0; // 0 = use all available hardware threads
+
   int option_index = 0;
   static struct option long_options[] = {
     {"input", required_argument, nullptr, 0},
@@ -52,6 +62,7 @@ int main(int argc, char* argv[])
     {"skip-parent-files-list", no_argument, nullptr, 4},
     {"compression", required_argument, nullptr, 5},
     {"merge-by-name", no_argument, nullptr, 6},
+    {"workers", required_argument, nullptr, 7},
     {"verbosity", required_argument, nullptr, 'v'},
     {"help", no_argument, nullptr, 'h'},
     {nullptr, 0, nullptr, 0}};
@@ -74,6 +85,8 @@ int main(int argc, char* argv[])
       compression = atoi(optarg);
     } else if (c == 6) {
       mergeByName = true;
+    } else if (c == 7) {
+      nWorkers = atoi(optarg);
     } else if (c == 'v') {
       verbosity = atoi(optarg);
     } else if (c == 'h') {
@@ -85,6 +98,7 @@ int main(int argc, char* argv[])
       printf("  --skip-parent-files-list     Flag to allow skipping the merging of the parent files list.\n");
       printf("  --compression <root compression id>  Compression algorithm / level to use (default: %d)\n", compression);
       printf("  --merge-by-name              Only merge TTrees from folders with the same name.\n");
+      printf("  --workers <N>                Number of parallel workers for tree merging (default: all hardware threads).\n");
       printf("  --verbosity <flag>           Verbosity of output (default: %d).\n", verbosity);
       return -1;
     } else {
@@ -103,6 +117,11 @@ int main(int argc, char* argv[])
     printf("  Merging only folders with the same name.\n");
   }
 
+  unsigned short int actualNWorkers = (nWorkers > 0) ? nWorkers : static_cast<int>(std::thread::hardware_concurrency());
+  ROOT::EnableImplicitMT(actualNWorkers);
+  tbb::task_arena arena(actualNWorkers);
+  printf("  Parallel workers: %d\n", actualNWorkers);
+
   std::map<std::string, TTree*> trees;
   std::map<std::string, uint64_t> sizeCompressed;
   std::map<std::string, uint64_t> sizeUncompressed;
@@ -111,16 +130,34 @@ int main(int argc, char* argv[])
 
   auto outputFile = TFile::Open(outputFileName.c_str(), "RECREATE", "", compression);
   TDirectory* outputDir = nullptr;
-  long currentDirSize = 0;
+  std::atomic<long> currentDirSize{0};
 
-  std::ifstream in;
-  in.open(inputCollection);
-  TString line;
+  // Read all input file paths upfront to enable the prefetch pipeline
+  std::vector<TString> inputFiles;
+  {
+    std::ifstream in;
+    in.open(inputCollection);
+    TString pathBuf;
+    while (in >> pathBuf) {
+      if (!pathBuf.IsNull()) {
+        inputFiles.push_back(std::move(pathBuf));
+      }
+    }
+  }
+
+  // Connect to AliEn once upfront, only if any file requires it
+  for (const auto& p : inputFiles) {
+    if (p.BeginsWith("alien:") && !gGrid) {
+      printf("Connecting to AliEn...\n");
+      TGrid::Connect("alien:");
+      break;
+    }
+  }
+
   TMap* metaData = nullptr;
   TMap* parentFiles = nullptr;
   int totalMergedDFs = 0;
   int mergedDFs = 0;
-
   // Write all accumulated trees to outputDir, update stats, and clean up state.
   auto flushTrees = [&](bool resetState) {
     if (!outputDir) {
@@ -142,23 +179,169 @@ int main(int argc, char* argv[])
     }
   };
 
-  while (in.good() && exitCode == 0) {
-    in >> line;
+  // Process entries for one tree using the given (already-opened) inputTree.
+  // Aligns branch addresses between input and output, sets up index-branch buffers,
+  // runs the per-entry loop with index offset adjustment, and fills the output tree.
+  // When alreadyCopied==true (CloneTree fast-path) no Fill() is issued; only the
+  // unassigned-index minimum is tracked.
+  // Safe to call from parallel TBB tasks as long as each call operates on a
+  // distinct (inputTree, outputTree) pair. ROOT::EnableImplicitMT() protects the
+  // shared TFile write state.
+  // Returns {bytesAdded, newMinUnassignedOffset, exitCode}.
+  auto processTree = [verbosity](
+                       TTree* inputTree,
+                       TTree* outputTree,
+                       bool alreadyCopied,
+                       bool fastCopy,
+                       const std::map<std::string, int>& snapshotOffsets,
+                       int startUnassignedOffset) -> std::tuple<long long, int, int> {
+    std::vector<std::pair<int*, int>> indexList;
+    std::vector<char*> vlaPointers;
+    std::vector<int*> slicePointers;
+    std::vector<int*> indexPointers;
 
-    if (line.Length() == 0) {
-      continue;
+    const char* treeName = inputTree->GetName();
+    TObjArray* branches = inputTree->GetListOfBranches();
+    for (int bi = 0; bi < branches->GetEntriesFast(); ++bi) {
+      TBranch* br = static_cast<TBranch*>(branches->UncheckedAt(bi));
+      TString branchName(br->GetName());
+
+      // detect VLA branch
+      if (static_cast<TLeaf*>(br->GetListOfLeaves()->First())->GetLeafCount() != nullptr) {
+        int maximum = static_cast<TLeaf*>(br->GetListOfLeaves()->First())->GetLeafCount()->GetMaximum();
+        TClass* cls = nullptr; // not static — avoid data race between parallel tasks
+        EDataType type;
+        br->GetExpectedType(cls, type);
+        int typeSize = TDataType::GetDataType(type)->Size();
+        char* buffer = new char[maximum * typeSize];
+        memset(buffer, 0, maximum * typeSize);
+        vlaPointers.push_back(buffer);
+        if (verbosity > 2) {
+          printf("      Allocated VLA buffer of length %d with %d bytes each for branch name %s\n", maximum, typeSize, br->GetName());
+        }
+        inputTree->SetBranchAddress(br->GetName(), buffer);
+        if (branchName.BeginsWith("fIndexArray")) {
+          int offset = snapshotOffsets.count(getTableName(branchName, treeName)) ? snapshotOffsets.at(getTableName(branchName, treeName)) : 0;
+          for (int j = 0; j < maximum; j++) {
+            indexList.push_back({reinterpret_cast<int*>(buffer + j * typeSize), offset});
+          }
+        }
+      } else if (branchName.BeginsWith("fIndexSlice")) {
+        int* buffer = new int[2];
+        memset(buffer, 0, 2 * sizeof(int));
+        slicePointers.push_back(buffer);
+        inputTree->SetBranchAddress(br->GetName(), buffer);
+        int offset = snapshotOffsets.count(getTableName(branchName, treeName)) ? snapshotOffsets.at(getTableName(branchName, treeName)) : 0;
+        indexList.push_back({buffer, offset});
+        indexList.push_back({buffer + 1, offset});
+      } else if (branchName.BeginsWith("fIndex") && !branchName.EndsWith("_size")) {
+        int* buffer = new int;
+        *buffer = 0;
+        indexPointers.push_back(buffer);
+        inputTree->SetBranchAddress(br->GetName(), buffer);
+        int offset = snapshotOffsets.count(getTableName(branchName, treeName)) ? snapshotOffsets.at(getTableName(branchName, treeName)) : 0;
+        indexList.push_back({buffer, offset});
+      }
     }
 
-    if (line.BeginsWith("alien:") && !gGrid) {
-      printf("Connecting to AliEn...");
-      TGrid::Connect("alien:");
+    // Copy all resolved input branch addresses to the output tree before any Fill().
+    if (!alreadyCopied) {
+      outputTree->CopyAddresses(inputTree);
     }
 
-    printf("Processing input file: %s\n", line.Data());
+    long long bytesAdded = 0;
+    int newMinOffset = startUnassignedOffset;
 
-    auto inputFile = TFile::Open(line);
+    if (!indexList.empty()) {
+      Long64_t entries = inputTree->GetEntries();
+      for (Long64_t ei = 0; ei < entries; ei++) {
+        for (auto& idx : indexList) {
+          *(idx.first) = 0; // reset before read so the prior-entry value is not used
+        }
+        inputTree->GetEntry(ei);
+        // shift index columns by offset
+        for (const auto& idx : indexList) {
+          // if negative, the index is unassigned — give unique negative IDs across blocks
+          if (*(idx.first) < 0) {
+            *(idx.first) += startUnassignedOffset;
+            newMinOffset = std::min(newMinOffset, *(idx.first));
+          } else {
+            *(idx.first) += idx.second;
+          }
+        }
+        if (!alreadyCopied) {
+          int nbytes = outputTree->Fill();
+          if (nbytes > 0) {
+            bytesAdded += nbytes;
+          }
+        }
+      }
+    } else if (!alreadyCopied) {
+      Long64_t nbytes = outputTree->CopyEntries(inputTree, -1, fastCopy ? "fast" : "");
+      if (nbytes > 0) {
+        bytesAdded += nbytes;
+      }
+    }
+
+    for (auto& buf : indexPointers) {
+      delete buf;
+    }
+    for (auto& buf : slicePointers) {
+      delete[] buf;
+    }
+    for (auto& buf : vlaPointers) {
+      delete[] buf;
+    }
+
+    // Avoid leaving dangling branch addresses on trees between calls.
+    inputTree->ResetBranchAddresses();
+    if (!alreadyCopied) {
+      outputTree->ResetBranchAddresses();
+    }
+
+    return {bytesAdded, newMinOffset, 0};
+  };
+
+  // Prefetch pipeline: open the next input file on a dedicated OS thread
+  // while the current file is being processed, hiding disk/network open
+  // latency behind CPU work. std::async(launch::async) is used rather than
+  // a TBB task because TFile::Open is blocking I/O, not CPU work.
+  std::future<TFile*> prefetchFuture;
+  if (!inputFiles.empty()) {
+    const TString first = inputFiles[0];
+    prefetchFuture = std::async(std::launch::async, [first]() -> TFile* {
+      return TFile::Open(first, "READ");
+    });
+  }
+
+  for (size_t fi = 0; fi < inputFiles.size() && exitCode == 0; ++fi) {
+    const TString currentFilePath = inputFiles[fi];
+
+    printf("Processing input file: %s\n", currentFilePath.Data());
+
+    // Retrieve the prefetched file handle for this iteration
+    TFile* inputFile = nullptr;
+    try {
+      inputFile = prefetchFuture.get();
+    } catch (...) {
+      inputFile = nullptr;
+    }
+
+    // Immediately launch prefetch of the next file so its open latency
+    // overlaps with the processing of the current file
+    if (fi + 1 < inputFiles.size()) {
+      const TString nextPath = inputFiles[fi + 1];
+      prefetchFuture = std::async(std::launch::async, [nextPath]() -> TFile* {
+        return TFile::Open(nextPath, "READ");
+      });
+    }
+
     if (!inputFile || inputFile->IsZombie()) {
-      printf("Error: %s input file %s.\n", !inputFile ? "Could not open" : "Zombie", line.Data());
+      printf("Error: %s input file %s.\n", !inputFile ? "Could not open" : "Zombie", currentFilePath.Data());
+      if (inputFile) {
+        inputFile->Close();
+        delete inputFile;
+      }
       if (skipNonExistingFiles) {
         continue;
       } else {
@@ -253,6 +436,15 @@ int main(int argc, char* argv[])
 
       std::list<std::string> foundTrees;
 
+      // Trees whose entries need to be processed: first-occurrence trees are handled
+      // serially via CloneTree; subsequent-occurrence trees are deferred and processed
+      // in parallel — each task opens its own TFile handle so reads do not contend.
+      struct DeferredTree {
+        std::string treeName;
+        bool fastCopy;
+      };
+      std::vector<DeferredTree> deferredTrees;
+
       for (auto key2 : *treeList) {
         auto treeName = ((TObjString*)key2)->GetString().Data();
         bool found = (std::find(foundTrees.begin(), foundTrees.end(), treeName) != foundTrees.end());
@@ -288,110 +480,78 @@ int main(int argc, char* argv[])
           auto outputTree = inputTree->CloneTree(-1, (fastCopy) ? "fast" : "");
           currentDirSize += inputTree->GetTotBytes(); // NOTE outputTree->GetTotBytes() is 0, so we use the inputTree here
           alreadyCopied = true;
-          outputTree->SetAutoFlush(0);
+          outputTree->SetAutoFlush(0);                // SetAutoFlush(-10000000LL); // flush every ~10 MB of basket data to cap in-memory accumulation
           trees[treeName] = outputTree;
+
+          // CloneTree already copied the data. Run processTree with alreadyCopied=true
+          // so that only the unassigned-index minimum is tracked (no Fill issued).
+          auto [bytes, newMinOffset, tCode] = processTree(
+            inputTree, outputTree, alreadyCopied, fastCopy,
+            offsets, unassignedIndexOffset.count(treeName) ? unassignedIndexOffset.at(treeName) : 0);
+          (void)bytes; // always 0 for alreadyCopied=true
+          unassignedIndexOffset[treeName] = newMinOffset;
+          if (tCode > 0 && exitCode == 0) {
+            exitCode = tCode;
+          }
         } else {
-          // adjust addresses tree
-          trees[treeName]->CopyAddresses(inputTree);
-        }
-
-        auto outputTree = trees[treeName];
-        // register index and connect VLA columns
-        std::vector<std::pair<int*, int>> indexList;
-        std::vector<char*> vlaPointers;
-        std::vector<int*> indexPointers;
-        TObjArray* branches = inputTree->GetListOfBranches();
-        for (int i = 0; i < branches->GetEntriesFast(); ++i) {
-          TBranch* br = (TBranch*)branches->UncheckedAt(i);
-          TString branchName(br->GetName());
-
-          // detect VLA
-          if (((TLeaf*)br->GetListOfLeaves()->First())->GetLeafCount() != nullptr) {
-            int maximum = ((TLeaf*)br->GetListOfLeaves()->First())->GetLeafCount()->GetMaximum();
-
-            // get type
-            static TClass* cls;
-            EDataType type;
-            br->GetExpectedType(cls, type);
-            auto typeSize = TDataType::GetDataType(type)->Size();
-
-            char* buffer = new char[maximum * typeSize];
-            memset(buffer, 0, maximum * typeSize);
-            vlaPointers.push_back(buffer);
-            if (verbosity > 2) {
-              printf("      Allocated VLA buffer of length %d with %d bytes each for branch name %s\n", maximum, typeSize, br->GetName());
-            }
-            inputTree->SetBranchAddress(br->GetName(), buffer);
-            outputTree->SetBranchAddress(br->GetName(), buffer);
-
-            if (branchName.BeginsWith("fIndexArray")) {
-              for (int i = 0; i < maximum; i++) {
-                indexList.push_back({reinterpret_cast<int*>(buffer + i * typeSize), offsets[getTableName(branchName, treeName)]});
-              }
-            }
-          } else if (branchName.BeginsWith("fIndexSlice")) {
-            int* buffer = new int[2];
-            memset(buffer, 0, 2 * sizeof(buffer[0]));
-            vlaPointers.push_back(reinterpret_cast<char*>(buffer));
-
-            inputTree->SetBranchAddress(br->GetName(), buffer);
-            outputTree->SetBranchAddress(br->GetName(), buffer);
-
-            indexList.push_back({buffer, offsets[getTableName(branchName, treeName)]});
-            indexList.push_back({buffer + 1, offsets[getTableName(branchName, treeName)]});
-          } else if (branchName.BeginsWith("fIndex") && !branchName.EndsWith("_size")) {
-            int* buffer = new int;
-            *buffer = 0;
-            indexPointers.push_back(buffer);
-
-            inputTree->SetBranchAddress(br->GetName(), buffer);
-            outputTree->SetBranchAddress(br->GetName(), buffer);
-
-            indexList.push_back({buffer, offsets[getTableName(branchName, treeName)]});
-          }
-        }
-
-        if (indexList.size() > 0) {
-          auto entries = inputTree->GetEntries();
-          int minIndexOffset = unassignedIndexOffset[treeName];
-          auto newMinIndexOffset = minIndexOffset;
-          for (int i = 0; i < entries; i++) {
-            for (auto& index : indexList) {
-              *(index.first) = 0; // Any positive number will do, in any case it will not be filled in the output. Otherwise the previous entry is used and manipulated in the following.
-            }
-            inputTree->GetEntry(i);
-            // shift index columns by offset
-            for (const auto& idx : indexList) {
-              // if negative, the index is unassigned. In this case, the different unassigned blocks have to get unique negative IDs
-              if (*(idx.first) < 0) {
-                *(idx.first) += minIndexOffset;
-                newMinIndexOffset = std::min(newMinIndexOffset, *(idx.first));
-              } else {
-                *(idx.first) += idx.second;
-              }
-            }
-            if (!alreadyCopied) {
-              int nbytes = outputTree->Fill();
-              if (nbytes > 0) {
-                currentDirSize += nbytes;
-              }
-            }
-          }
-          unassignedIndexOffset[treeName] = newMinIndexOffset;
-        } else if (!alreadyCopied) {
-          auto nbytes = outputTree->CopyEntries(inputTree, -1, (fastCopy) ? "fast" : "");
-          if (nbytes > 0) {
-            currentDirSize += nbytes;
-          }
+          // Defer entry-level processing to the parallel phase below
+          deferredTrees.push_back({treeName, fastCopy});
         }
 
         delete inputTree;
+      }
 
-        for (auto& buffer : indexPointers) {
-          delete buffer;
-        }
-        for (auto& buffer : vlaPointers) {
-          delete[] buffer;
+      // Parallel phase: process all deferred (already-existing) trees concurrently.
+      // Each TBB task opens its own TFile handle for the current input file so that
+      // concurrent TTree reads do not share state. ROOT::EnableImplicitMT() ensures
+      // that concurrent TTree::Fill() calls on different trees in the same output
+      // TFile are serialised at the I/O level.
+      if (!deferredTrees.empty() && exitCode == 0) {
+        // Snapshot offsets so parallel tasks read a consistent, immutable map
+        const std::map<std::string, int> snapshotOffsets = offsets;
+        // Per-task results carry only the unassigned-index minimum and any
+        // error code. Bytes are accumulated via atomic currentDirSize directly
+        // from each task, removing the need for a serial gather step.
+        struct TaskResult {
+          int newMinOffset;
+          int exitCode;
+        };
+        std::vector<TaskResult> taskResults(deferredTrees.size());
+
+        arena.execute([&]() {
+          tbb::task_group tg;
+          for (size_t ti = 0; ti < deferredTrees.size(); ++ti) {
+            tg.run([&, ti, currentFilePath]() {
+              const auto& dt = deferredTrees[ti];
+              int startUnassigned = unassignedIndexOffset.count(dt.treeName) ? unassignedIndexOffset.at(dt.treeName) : 0;
+              auto privateFile = TFile::Open(currentFilePath, "READ");
+              if (!privateFile || privateFile->IsZombie()) {
+                taskResults[ti] = {startUnassigned, 5};
+                delete privateFile;
+                return;
+              }
+              auto privateTree = static_cast<TTree*>(privateFile->Get(Form("%s/%s", dfName, dt.treeName.c_str())));
+              auto [bytes, newMinOffset, tCode] = processTree(
+                privateTree, trees.at(dt.treeName), /*alreadyCopied=*/false, dt.fastCopy,
+                snapshotOffsets, startUnassigned);
+              // Accumulate bytes atomically from this task — no serial gather needed
+              if (bytes > 0) {
+                currentDirSize.fetch_add(bytes, std::memory_order_relaxed);
+              }
+              taskResults[ti] = {newMinOffset, tCode};
+              privateFile->Close();
+              delete privateFile;
+            });
+          }
+          tg.wait();
+        });
+
+        // Aggregate per-task results back into the serial state
+        for (size_t ti = 0; ti < deferredTrees.size(); ++ti) {
+          unassignedIndexOffset[deferredTrees[ti].treeName] = taskResults[ti].newMinOffset;
+          if (taskResults[ti].exitCode > 0 && exitCode == 0) {
+            exitCode = taskResults[ti].exitCode;
+          }
         }
       }
       if (exitCode > 0) {
@@ -432,12 +592,13 @@ int main(int argc, char* argv[])
 
       if (maxDirSize == 0 || currentDirSize > maxDirSize) {
         if (verbosity > 0) {
-          printf("Maximum size reached: %ld. Closing folder %s.\n", currentDirSize, dfName);
+          printf("Maximum size reached: %ld. Closing folder %s.\n", currentDirSize.load(), dfName);
         }
         flushTrees(true);
       }
     }
     inputFile->Close();
+    delete inputFile;
   }
 
   if (parentFiles) {

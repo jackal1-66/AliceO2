@@ -12,7 +12,7 @@
 o2_add_executable(merger
                   COMPONENT_NAME aod
                   SOURCES src/aodMerger.cxx
-                  PUBLIC_LINK_LIBRARIES  ROOT::Core ROOT::Net)
+                  PUBLIC_LINK_LIBRARIES  ROOT::Core ROOT::Net TBB::tbb)
 
 o2_add_executable(thinner
                   COMPONENT_NAME aod
