@@ -1,0 +1,25 @@
+{
+  "N_CTX": 5,
+  "fileNames": [
+    "FDD",
+    "FT0",
+    "FV0",
+    "ITS",
+    "MFT"
+  ],
+  "n_features": {
+    "FDD": 6,
+    "FT0": 5,
+    "FV0": 12,
+    "ITS": 12,
+    "MFT": 12
+  },
+  "CFM_STEPS": 10,
+  "CFM_HIDDEN": [
+    512,
+    512,
+    256
+  ],
+  "CFM_SIGMA": 0.0,
+  "CFM_TIME_FREQS": 16
+}

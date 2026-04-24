@@ -165,7 +165,21 @@ o2_add_test_root_macro(share/egconfig/pythia8_userhooks_charm.C
                        LABELS generators)
 endif()
 
+o2_add_executable(qed-fast-gen
+                  COMPONENT_NAME generators
+                  SOURCES src/QEDFastGen.cxx
+                  PUBLIC_LINK_LIBRARIES O2::Generators
+                                        O2::CCDB
+                                        O2::DataFormatsFDD
+                                        O2::DataFormatsFT0
+                                        O2::DataFormatsFV0
+                                        O2::ITSMFTSimulation
+                                        ROOT::Core
+                                        onnxruntime::onnxruntime
+                                        Boost::program_options)
+
 o2_data_file(COPY share/external DESTINATION Generators)
 o2_data_file(COPY share/egconfig DESTINATION Generators)
 o2_data_file(COPY share/TPCLoopers DESTINATION Generators)
+o2_data_file(COPY share/QEDFastGen DESTINATION Generators)
 o2_data_file(COPY share/pythia8 DESTINATION Generators)

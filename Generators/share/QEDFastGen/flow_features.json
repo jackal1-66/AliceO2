@@ -1,0 +1,59 @@
+{
+  "FDD": [
+    "FDDHit.mPos.fCoordinates.fX",
+    "FDDHit.mPos.fCoordinates.fY",
+    "FDDHit.mPos.fCoordinates.fZ",
+    "FDDHit.mTime",
+    "FDDHit.mHitValue",
+    "FDDHit.mNphot"
+  ],
+  "FT0": [
+    "FT0Hit.mPos.fCoordinates.fX",
+    "FT0Hit.mPos.fCoordinates.fY",
+    "FT0Hit.mPos.fCoordinates.fZ",
+    "FT0Hit.mTime",
+    "FT0Hit.mHitValue"
+  ],
+  "FV0": [
+    "FV0Hit.mPos.fCoordinates.fX",
+    "FV0Hit.mPos.fCoordinates.fY",
+    "FV0Hit.mPos.fCoordinates.fZ",
+    "FV0Hit.mTime",
+    "FV0Hit.mHitValue",
+    "FV0Hit.mMomentumStart.fCoordinates.fX",
+    "FV0Hit.mMomentumStart.fCoordinates.fY",
+    "FV0Hit.mMomentumStart.fCoordinates.fZ",
+    "FV0Hit.mPositionStart.fCoordinates.fX",
+    "FV0Hit.mPositionStart.fCoordinates.fY",
+    "FV0Hit.mPositionStart.fCoordinates.fZ",
+    "FV0Hit.mEnergyStart"
+  ],
+  "ITS": [
+    "ITSHit.mPos.fCoordinates.fX",
+    "ITSHit.mPos.fCoordinates.fY",
+    "ITSHit.mPos.fCoordinates.fZ",
+    "ITSHit.mTime",
+    "ITSHit.mHitValue",
+    "ITSHit.mMomentum.fCoordinates.fX",
+    "ITSHit.mMomentum.fCoordinates.fY",
+    "ITSHit.mMomentum.fCoordinates.fZ",
+    "ITSHit.mPosStart.fCoordinates.fX",
+    "ITSHit.mPosStart.fCoordinates.fY",
+    "ITSHit.mPosStart.fCoordinates.fZ",
+    "ITSHit.mE"
+  ],
+  "MFT": [
+    "MFTHit.mPos.fCoordinates.fX",
+    "MFTHit.mPos.fCoordinates.fY",
+    "MFTHit.mPos.fCoordinates.fZ",
+    "MFTHit.mTime",
+    "MFTHit.mHitValue",
+    "MFTHit.mMomentum.fCoordinates.fX",
+    "MFTHit.mMomentum.fCoordinates.fY",
+    "MFTHit.mMomentum.fCoordinates.fZ",
+    "MFTHit.mPosStart.fCoordinates.fX",
+    "MFTHit.mPosStart.fCoordinates.fY",
+    "MFTHit.mPosStart.fCoordinates.fZ",
+    "MFTHit.mE"
+  ]
+}
