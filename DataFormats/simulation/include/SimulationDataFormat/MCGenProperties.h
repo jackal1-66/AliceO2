@@ -26,12 +26,13 @@ union MCGenStatusEncoding {
   MCGenStatusEncoding() : fullEncoding(0) {}
   MCGenStatusEncoding(int enc) : fullEncoding(enc) {}
   // To be backward-compatible, only set transport to 1 if hepmc status is 1
-  MCGenStatusEncoding(int hepmcIn, int genIn) : isEncoded(isEncodedValue), hepmc(hepmcIn), gen(genIn), reserved(0) {}
+  MCGenStatusEncoding(int hepmcIn, int genIn) : isEncoded(isEncodedValue), hepmc(hepmcIn), gen(genIn), sourceId(0), reserved(0) {}
   int fullEncoding;
   struct {
     int hepmc : 9;              // HepMC status code
     int gen : 10;               // specific generator status code
-    int reserved : 10;          // reserved bits for future usage
+    unsigned int sourceId : 3;  // source ID for embedding scenarios, such as in hybrid cocktails
+    int reserved : 7;           // reserved bits for future usage
     unsigned int isEncoded : 3; // special bits to check whether or not the fullEncoding is a combination of HepMC and gen status codes
   };
 };
@@ -72,6 +73,34 @@ inline int getHepMCStatusCode(int encoded)
 inline int getGenStatusCode(int encoded)
 {
   return getGenStatusCode(MCGenStatusEncoding(encoded));
+}
+
+inline int getSourceId(MCGenStatusEncoding enc)
+{
+  if (!isEncoded(enc)) {
+    return 0;
+  }
+  return enc.sourceId;
+}
+
+inline int getSourceId(int encoded)
+{
+  return getSourceId(MCGenStatusEncoding(encoded));
+}
+
+// returns a new encoded status code with the sourceId bits set to the given value,
+// preserving the hepmc/gen status codes already present in encoded
+inline int setSourceId(int encoded, int sourceId)
+{
+  MCGenStatusEncoding enc(encoded);
+  if (!isEncoded(enc)) {
+    // legacy/un-encoded status code: re-express as hepmc-only (gen=0), matching the
+    // convention already used by e.g. BoxGenerator/GeneratorTGenerator, so that attaching
+    // a sourceId cannot silently corrupt the original (un-encoded) status value
+    enc = MCGenStatusEncoding(encoded, 0);
+  }
+  enc.sourceId = sourceId;
+  return enc.fullEncoding;
 }
 
 } // namespace mcgenstatus

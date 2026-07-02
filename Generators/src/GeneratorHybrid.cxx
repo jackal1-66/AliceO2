@@ -439,6 +439,11 @@ bool GeneratorHybrid::importParticles()
   mMCEventHeader.Reset();
   if (mCocktailMode) {
     // in cocktail mode we need to merge the particles from the different generators
+    // localSourceId identifies, per particle, the cocktail's generator (3 bits).
+    // It is encoded into each particle's existing generator-status code. It is set to 0 by default.
+    // Particles from a specific generator will be identified by selecting the event with the subGeneratorID
+    // and then filtering the particles with the corresponding sourceId.
+    short localSourceId = 0;
     for (auto subIndex : subGenIndex) {
       LOG(info) << "Importing particles for task " << subIndex;
       auto subParticles = gens[subIndex]->getParticles();
@@ -457,6 +462,8 @@ bool GeneratorHybrid::importParticles()
         index_transformer(p, offset);
         // apply unit transformation of sub-generator
         unit_transformer(p, pos_unit, time_unit, energy_unit, mom_unit);
+        // tag the particle with sourceId of the sub-generator
+        p.SetStatusCode(o2::mcgenstatus::setSourceId(p.GetStatusCode(), localSourceId));
       }
 
       mParticles.insert(mParticles.end(), subParticles.begin(), subParticles.end());
@@ -467,6 +474,7 @@ bool GeneratorHybrid::importParticles()
       }
       mInputTaskQueue.push(subIndex);
       mTasksStarted++;
+      ++localSourceId;
     }
   } else {
     LOG(info) << "Importing particles for task " << genIndex;
