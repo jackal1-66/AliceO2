@@ -112,7 +112,7 @@ std::optional<std::vector<std::string>> readAlienListFileLines(std::string const
   }
   static std::atomic<int> counter{0};
   const auto tmpPath = fs::temp_directory_path() /
-                        fs::path("merge-evtpool-list-" + std::to_string(::getpid()) + "-" + std::to_string(counter++) + ".txt");
+                       fs::path("merge-evtpool-list-" + std::to_string(::getpid()) + "-" + std::to_string(counter++) + ".txt");
 
   TString cmd = Form("alien_cp %s file:%s", entry.c_str(), tmpPath.c_str());
   const bool fetched = gSystem->Exec(cmd.Data()) == 0;
@@ -271,8 +271,8 @@ std::vector<Event> readFile(std::string const& file, std::string const& treename
 // per thread); a single writer (this thread) fills the output tree strictly in input-file
 // order as soon as each file's buffer is ready.
 Long64_t mergeFiles(std::vector<std::string> const& files, std::string const& treename,
-                     std::string const& outfile, std::vector<Long64_t> const& entryCounts,
-                     UInt_t startId, unsigned int jobs)
+                    std::string const& outfile, std::vector<Long64_t> const& entryCounts,
+                    UInt_t startId, unsigned int jobs)
 {
   TFile fout(outfile.c_str(), "RECREATE");
   if (fout.IsZombie()) {
@@ -383,15 +383,10 @@ Long64_t mergeFiles(std::vector<std::string> const& files, std::string const& tr
 int main(int argc, char* argv[])
 {
   bpo::options_description options("o2-generators-merge-evtpool options");
-  options.add_options()
-    ("input,i", bpo::value<std::string>()->required(), "comma-separated list of inputs: event-pool ROOT files "
-     ", and/or text files (local or alien://, fetched via alien_cp) listing more "
-     "paths (one per line, '#' comments allowed)")
-    ("output,o", bpo::value<std::string>()->default_value("evtpool.root"), "output ROOT file with the merged event pool")
-    ("treename,t", bpo::value<std::string>()->default_value("o2sim"), "name of the tree to merge")
-    ("start-id", bpo::value<UInt_t>()->default_value(1), "event ID assigned to the first merged event")
-    ("jobs,j", bpo::value<unsigned int>()->default_value(8), "number of worker threads used to read input files in parallel (0 = auto-detect)")
-    ("help,h", "produce help message");
+  options.add_options()("input,i", bpo::value<std::string>()->required(),
+                        "comma-separated list of inputs: event-pool ROOT files "
+                        ", and/or text files (local or alien://, fetched via alien_cp) listing more "
+                        "paths (one per line, '#' comments allowed)")("output,o", bpo::value<std::string>()->default_value("evtpool.root"), "output ROOT file with the merged event pool")("treename,t", bpo::value<std::string>()->default_value("o2sim"), "name of the tree to merge")("start-id", bpo::value<UInt_t>()->default_value(1), "event ID assigned to the first merged event")("jobs,j", bpo::value<unsigned int>()->default_value(8), "number of worker threads used to read input files in parallel (0 = auto-detect)")("help,h", "produce help message");
 
   bpo::variables_map vm;
   try {
