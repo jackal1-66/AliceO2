@@ -14,7 +14,8 @@
     "ITS": 12,
     "MFT": 12
   },
-  "CFM_STEPS": 10,
+  "CFM_STEPS": 5,
+  "CFM_METHOD": "midpoint",
   "CFM_HIDDEN": [
     512,
     512,

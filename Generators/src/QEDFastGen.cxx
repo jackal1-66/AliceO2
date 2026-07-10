@@ -108,7 +108,8 @@ struct OrtSession {
 struct Artefacts {
   std::vector<std::string> detectors;
   int n_ctx{};
-  int cfm_steps{};  // Euler integration steps read from model_cfg.json
+  int cfm_steps{};                   // integration steps read from model_cfg.json
+  std::string cfm_method{"euler"};   // ODE solver: "euler" or "midpoint" (model_cfg.json)
   std::map<std::string, int> n_features;
   std::map<std::string, OrtSession> sessions;
   std::map<std::string, QuantileScaler> scalers;
@@ -250,7 +251,13 @@ static Artefacts load_artefacts(const std::string& dir, int n_threads)
     art.n_ctx = j["N_CTX"].get<int>();
     for (const auto& det : art.detectors)
       art.n_features[det] = j["n_features"][det].get<int>();
+    // Configs written before 2026-07 carry no CFM_METHOD key -> default "euler".
     art.cfm_steps = j.value("CFM_STEPS", 10);
+    art.cfm_method = j.value("CFM_METHOD", std::string("euler"));
+    if (art.cfm_method != "euler" && art.cfm_method != "midpoint") {
+      LOG(fatal) << "Unknown sampler method in model_cfg.json: " << art.cfm_method;
+      exit(1);
+    }
   }
 
   // scalers.json
@@ -404,8 +411,15 @@ static std::vector<Event> simulate(int n_events, const Artefacts& art, std::mt19
     }
   }
 
-  // Stage 3: Euler ODE -- x += velocity(x, t, ctx)*dt for cfm_steps steps.
+  // Stage 3: ODE integration from x_0 ~ N(0,I) at t=0 to the data sample at t=1,
+  // with dt = 1/cfm_steps and the velocity MLP (x_t, t_vec, ctx) -> velocity:
+  //   euler    (1 ONNX call/step):  x += dt * v(x, t)
+  //   midpoint (2 ONNX calls/step): k1 = v(x, t);  x += dt * v(x + dt/2*k1, t + dt/2)
+  // The midpoint (RK2) rule is the notebook default since 2026-07: at the same
+  // total number of MLP calls it removes almost all integration error
+  // (measured KS mean 0.0151 for midpoint-5 vs 0.0347 for euler-10).
   const float dt = 1.0f / static_cast<float>(art.cfm_steps);
+  const bool use_midpoint = (art.cfm_method == "midpoint");
 
   // Normal distribution provides the starting noise for the features
   std::normal_distribution<float> normal(0.f, 1.f);
@@ -446,11 +460,12 @@ static std::vector<Event> simulate(int n_events, const Artefacts& art, std::mt19
     std::array<int64_t, 1> t_shape{total};
     std::array<int64_t, 2> c_shape{total, art.n_ctx};
 
-    for (int step = 0; step < art.cfm_steps; ++step) {
-      std::fill(t_vec.begin(), t_vec.end(), step * dt);
+    // One velocity evaluation: returns Run() output holding v(x_in, t_scalar, ctx).
+    auto eval_velocity = [&](std::vector<float>& x_in, float t_scalar) {
+      std::fill(t_vec.begin(), t_vec.end(), t_scalar);
 
       Ort::Value x_tensor = Ort::Value::CreateTensor<float>(
-        mem_info, x_data.data(), static_cast<size_t>(total * n_feat),
+        mem_info, x_in.data(), static_cast<size_t>(total * n_feat),
         x_shape.data(), x_shape.size());
       Ort::Value t_tensor = Ort::Value::CreateTensor<float>(
         mem_info, t_vec.data(), static_cast<size_t>(total),
@@ -464,15 +479,36 @@ static std::vector<Event> simulate(int n_events, const Artefacts& art, std::mt19
       inputs.push_back(std::move(t_tensor));
       inputs.push_back(std::move(c_tensor));
 
-      auto out = os.session->Run(
+      return os.session->Run(
         Ort::RunOptions{nullptr},
         os.input_names.data(), inputs.data(), inputs.size(),
         os.output_names.data(), os.output_names.size());
+    };
 
-      const float* vel = out[0].GetTensorData<float>();
-      const int sz = total * n_feat;
-      for (int k = 0; k < sz; ++k)
-        x_data[k] += vel[k] * dt;
+    const int sz = total * n_feat;
+    std::vector<float> x_half;
+    if (use_midpoint)
+      x_half.resize(sz);
+
+    for (int step = 0; step < art.cfm_steps; ++step) {
+      const float t0 = step * dt;
+      if (use_midpoint) {
+        // k1 = v(x, t);  x += dt * v(x + dt/2*k1, t + dt/2)
+        auto out1 = eval_velocity(x_data, t0);
+        const float* k1 = out1[0].GetTensorData<float>();
+        for (int k = 0; k < sz; ++k)
+          x_half[k] = x_data[k] + 0.5f * dt * k1[k];
+        auto out2 = eval_velocity(x_half, t0 + 0.5f * dt);
+        const float* v2 = out2[0].GetTensorData<float>();
+        for (int k = 0; k < sz; ++k)
+          x_data[k] += dt * v2[k];
+      } else {
+        // x += dt * v(x, t)
+        auto out = eval_velocity(x_data, t0);
+        const float* vel = out[0].GetTensorData<float>();
+        for (int k = 0; k < sz; ++k)
+          x_data[k] += vel[k] * dt;
+      }
     }
 
     const float* hits_ptr = x_data.data();
@@ -554,175 +590,180 @@ static o2::itsmft::Hit make_itsmft_hit(int trackID, const std::vector<float>& f)
                          o2::itsmft::Hit::kTrackExiting);   // endStatus
 }
 
-// -- Write per-detector Hits.root files
-static void write_hits(
-  const std::vector<Event>& events,
-  const Artefacts& art,
-  const std::string& out_dir,
-  const std::string& prefix)
-{
+// -- Incremental per-detector Hits.root writer
+// The files/trees are opened once, then fill() is called per simulated chunk of
+// events and streams the hits to disk immediately.  This bounds peak memory to
+// one chunk instead of the full generation (the previous version held all
+// events in RAM before writing, which exhausted memory around 180k events).
+struct HitWriter {
   std::vector<o2::fdd::Hit> fdd_hits;
   std::vector<o2::ft0::HitType> ft0_hits;
   std::vector<o2::fv0::Hit> fv0_hits;
   std::vector<o2::itsmft::Hit> its_hits;
   std::vector<o2::itsmft::Hit> mft_hits;
 
-  auto open_file = [&](const std::string& fname) -> std::pair<TFile*, TTree*> {
-    TFile* f = TFile::Open(fname.c_str(), "RECREATE");
-    if (!f || f->IsZombie()) {
-      LOG(fatal) << "Error: Cannot create file " << fname;
-      exit(1);
-    }  
-    auto* t = new TTree("o2sim", "o2sim");
-    return {f, t};
-  };
+  TFile *fdd_file{nullptr}, *ft0_file{nullptr}, *fv0_file{nullptr},
+        *its_file{nullptr}, *mft_file{nullptr};
+  TTree *fdd_tree{nullptr}, *ft0_tree{nullptr}, *fv0_tree{nullptr},
+        *its_tree{nullptr}, *mft_tree{nullptr};
+  bool has_fdd{}, has_ft0{}, has_fv0{}, has_its{}, has_mft{};
 
-  const bool has_fdd = std::count(art.detectors.begin(), art.detectors.end(), "FDD");
-  const bool has_ft0 = std::count(art.detectors.begin(), art.detectors.end(), "FT0");
-  const bool has_fv0 = std::count(art.detectors.begin(), art.detectors.end(), "FV0");
-  const bool has_its = std::count(art.detectors.begin(), art.detectors.end(), "ITS");
-  const bool has_mft = std::count(art.detectors.begin(), art.detectors.end(), "MFT");
+  // Accumulated statistics across all chunks (for the final summary)
+  std::map<std::string, int> n_active, n_hits;
+  long n_events_total{0};
 
-  TFile* fdd_file = nullptr;
-  TTree* fdd_tree = nullptr;
-  if (has_fdd) {
-    std::string fname = out_dir + prefix + "_HitsFDD.root";
-    std::tie(fdd_file, fdd_tree) = open_file(fname);
-    fdd_tree->Branch("FDDHit", &fdd_hits);
-  }
+  void open(const Artefacts& art, const std::string& out_dir, const std::string& prefix)
+  {
+    auto open_file = [&](const std::string& fname) -> std::pair<TFile*, TTree*> {
+      TFile* f = TFile::Open(fname.c_str(), "RECREATE");
+      if (!f || f->IsZombie()) {
+        LOG(fatal) << "Error: Cannot create file " << fname;
+        exit(1);
+      }
+      auto* t = new TTree("o2sim", "o2sim");
+      return {f, t};
+    };
 
-  TFile* ft0_file = nullptr;
-  TTree* ft0_tree = nullptr;
-  if (has_ft0) {
-    std::string fname = out_dir + prefix + "_HitsFT0.root";
-    std::tie(ft0_file, ft0_tree) = open_file(fname);
-    ft0_tree->Branch("FT0Hit", &ft0_hits);
-  }
+    has_fdd = std::count(art.detectors.begin(), art.detectors.end(), "FDD");
+    has_ft0 = std::count(art.detectors.begin(), art.detectors.end(), "FT0");
+    has_fv0 = std::count(art.detectors.begin(), art.detectors.end(), "FV0");
+    has_its = std::count(art.detectors.begin(), art.detectors.end(), "ITS");
+    has_mft = std::count(art.detectors.begin(), art.detectors.end(), "MFT");
 
-  TFile* fv0_file = nullptr;
-  TTree* fv0_tree = nullptr;
-  if (has_fv0) {
-    std::string fname = out_dir + prefix + "_HitsFV0.root";
-    std::tie(fv0_file, fv0_tree) = open_file(fname);
-    fv0_tree->Branch("FV0Hit", &fv0_hits);
-  }
-
-  TFile* its_file = nullptr;
-  TTree* its_tree = nullptr;
-  if (has_its) {
-    std::string fname = out_dir + prefix + "_HitsITS.root";
-    std::tie(its_file, its_tree) = open_file(fname);
-    its_tree->Branch("ITSHit", &its_hits);
-  }
-
-  TFile* mft_file = nullptr;
-  TTree* mft_tree = nullptr;
-  if (has_mft) {
-    std::string fname = out_dir + prefix + "_HitsMFT.root";
-    std::tie(mft_file, mft_tree) = open_file(fname);
-    mft_tree->Branch("MFTHit", &mft_hits);
-  }
-
-  for (int ev = 0; ev < static_cast<int>(events.size()); ++ev) {
-    const Event& event = events[ev];
-    const int trackID = 0;
-
-    // FDD
     if (has_fdd) {
-      fdd_hits.clear();
-      auto it = event.find("FDD");
-      if (it != event.end()) {
-        for (const auto& feat : it->second)
-          fdd_hits.push_back(make_fdd_hit(trackID, feat));
-      }
-      fdd_file->cd();
-      fdd_tree->Fill();
+      std::tie(fdd_file, fdd_tree) = open_file(out_dir + prefix + "_HitsFDD.root");
+      fdd_tree->Branch("FDDHit", &fdd_hits);
     }
-
-    // FT0
     if (has_ft0) {
-      ft0_hits.clear();
-      auto it = event.find("FT0");
-      if (it != event.end()) {
-        for (const auto& feat : it->second)
-          ft0_hits.push_back(make_ft0_hit(trackID, feat));
-      }
-      ft0_file->cd();
-      ft0_tree->Fill();
+      std::tie(ft0_file, ft0_tree) = open_file(out_dir + prefix + "_HitsFT0.root");
+      ft0_tree->Branch("FT0Hit", &ft0_hits);
     }
-
-    // FV0
     if (has_fv0) {
-      fv0_hits.clear();
-      auto it = event.find("FV0");
-      if (it != event.end()) {
-        for (const auto& feat : it->second)
-          fv0_hits.push_back(make_fv0_hit(trackID, feat));
-      }
-      fv0_file->cd();
-      fv0_tree->Fill();
+      std::tie(fv0_file, fv0_tree) = open_file(out_dir + prefix + "_HitsFV0.root");
+      fv0_tree->Branch("FV0Hit", &fv0_hits);
     }
-
-    // ITS
     if (has_its) {
-      its_hits.clear();
-      auto it = event.find("ITS");
-      if (it != event.end()) {
-        for (const auto& feat : it->second)
-          its_hits.push_back(make_itsmft_hit(trackID, feat));
-      }
-      its_file->cd();
-      its_tree->Fill();
+      std::tie(its_file, its_tree) = open_file(out_dir + prefix + "_HitsITS.root");
+      its_tree->Branch("ITSHit", &its_hits);
     }
-
-    // MFT
     if (has_mft) {
-      mft_hits.clear();
-      auto it = event.find("MFT");
-      if (it != event.end()) {
-        for (const auto& feat : it->second)
-          mft_hits.push_back(make_itsmft_hit(trackID, feat));
-      }
-      mft_file->cd();
-      mft_tree->Fill();
+      std::tie(mft_file, mft_tree) = open_file(out_dir + prefix + "_HitsMFT.root");
+      mft_tree->Branch("MFTHit", &mft_hits);
     }
   }
 
-  auto close_file = [](TFile* f, TTree* t) {
-    if (!f)
-      return;
-    f->cd();
-    t->Write("", TObject::kWriteDelete);
-    f->Close();
-    delete f;
-  };
+  void fill(const std::vector<Event>& events)
+  {
+    for (const auto& event : events) {
+      const int trackID = 0;
 
-  close_file(fdd_file, fdd_tree);
-  close_file(ft0_file, ft0_tree);
-  close_file(fv0_file, fv0_tree);
-  close_file(its_file, its_tree);
-  close_file(mft_file, mft_tree);
-}
+      if (has_fdd) {
+        fdd_hits.clear();
+        auto it = event.find("FDD");
+        if (it != event.end()) {
+          for (const auto& feat : it->second)
+            fdd_hits.push_back(make_fdd_hit(trackID, feat));
+          if (!it->second.empty()) {
+            ++n_active["FDD"];
+            n_hits["FDD"] += static_cast<int>(it->second.size());
+          }
+        }
+        fdd_file->cd();
+        fdd_tree->Fill();
+      }
 
-// -- Print summary
-static void print_summary(const std::vector<Event>& events, const Artefacts& art)
-{
-  LOG(info) << "\n  Per-detector statistics:\n";
-  for (const auto& det : art.detectors) {
-    int n_active = 0, n_hits = 0;
-    for (const auto& ev : events) {
-      auto it = ev.find(det);
-      if (it != ev.end() && !it->second.empty()) {
-        ++n_active;
-        n_hits += static_cast<int>(it->second.size());
+      if (has_ft0) {
+        ft0_hits.clear();
+        auto it = event.find("FT0");
+        if (it != event.end()) {
+          for (const auto& feat : it->second)
+            ft0_hits.push_back(make_ft0_hit(trackID, feat));
+          if (!it->second.empty()) {
+            ++n_active["FT0"];
+            n_hits["FT0"] += static_cast<int>(it->second.size());
+          }
+        }
+        ft0_file->cd();
+        ft0_tree->Fill();
+      }
+
+      if (has_fv0) {
+        fv0_hits.clear();
+        auto it = event.find("FV0");
+        if (it != event.end()) {
+          for (const auto& feat : it->second)
+            fv0_hits.push_back(make_fv0_hit(trackID, feat));
+          if (!it->second.empty()) {
+            ++n_active["FV0"];
+            n_hits["FV0"] += static_cast<int>(it->second.size());
+          }
+        }
+        fv0_file->cd();
+        fv0_tree->Fill();
+      }
+
+      if (has_its) {
+        its_hits.clear();
+        auto it = event.find("ITS");
+        if (it != event.end()) {
+          for (const auto& feat : it->second)
+            its_hits.push_back(make_itsmft_hit(trackID, feat));
+          if (!it->second.empty()) {
+            ++n_active["ITS"];
+            n_hits["ITS"] += static_cast<int>(it->second.size());
+          }
+        }
+        its_file->cd();
+        its_tree->Fill();
+      }
+
+      if (has_mft) {
+        mft_hits.clear();
+        auto it = event.find("MFT");
+        if (it != event.end()) {
+          for (const auto& feat : it->second)
+            mft_hits.push_back(make_itsmft_hit(trackID, feat));
+          if (!it->second.empty()) {
+            ++n_active["MFT"];
+            n_hits["MFT"] += static_cast<int>(it->second.size());
+          }
+        }
+        mft_file->cd();
+        mft_tree->Fill();
       }
     }
-    LOG(info) << "    " << det
-              << "  active_events=" << n_active
-              << "/" << events.size()
-              << "  total_hits=" << n_hits << "\n";
+    n_events_total += static_cast<long>(events.size());
   }
-}
+
+  void close()
+  {
+    auto close_file = [](TFile* f, TTree* t) {
+      if (!f)
+        return;
+      f->cd();
+      t->Write("", TObject::kWriteDelete);
+      f->Close();
+      delete f;
+    };
+    close_file(fdd_file, fdd_tree);
+    close_file(ft0_file, ft0_tree);
+    close_file(fv0_file, fv0_tree);
+    close_file(its_file, its_tree);
+    close_file(mft_file, mft_tree);
+    fdd_file = ft0_file = fv0_file = its_file = mft_file = nullptr;
+  }
+
+  void print_summary(const Artefacts& art) const
+  {
+    LOG(info) << "\n  Per-detector statistics:\n";
+    for (const auto& det : art.detectors) {
+      LOG(info) << "    " << det
+                << "  active_events=" << (n_active.count(det) ? n_active.at(det) : 0)
+                << "/" << n_events_total
+                << "  total_hits=" << (n_hits.count(det) ? n_hits.at(det) : 0) << "\n";
+    }
+  }
+};
 
 // -- Entry point ---------------------------------------------------------------
 namespace bpo = boost::program_options;
@@ -741,6 +782,7 @@ int main(int argc, char* argv[])
     ("prefix,p",     bpo::value<std::string>()->default_value("qed"), "file-name prefix")
     ("seed,s",       bpo::value<uint32_t>()->default_value(42u),        "RNG seed")
     ("threads,j",    bpo::value<int>()->default_value(default_threads), "ORT intra/inter-op thread count")
+    ("chunk,c",      bpo::value<int>()->default_value(20000),           "events simulated and written per chunk (bounds peak memory)")
     ("help,h",       "produce help message");
 
   bpo::variables_map vm;
@@ -780,6 +822,7 @@ int main(int argc, char* argv[])
   const std::string prefix      = vm["prefix"].as<std::string>();
   const uint32_t seed           = vm["seed"].as<uint32_t>();
   const int n_threads           = std::max(1, vm["threads"].as<int>());
+  const int chunk_size          = std::max(1, vm["chunk"].as<int>());
 
   LOG(info) << "qedFastSimCFM - QED Conditional Flow Matching to AliceO2 Hits\n"
             << "  models_dir : " << models_dir << '\n'
@@ -787,7 +830,8 @@ int main(int argc, char* argv[])
             << "  output_dir : " << out_dir << '\n'
             << "  prefix     : " << prefix << '\n'
             << "  seed       : " << seed << '\n'
-            << "  threads    : " << n_threads << "\n\n";
+            << "  threads    : " << n_threads << '\n'
+            << "  chunk      : " << chunk_size << "\n\n";
 
   // Download ONNX models if models_onnx.json specifies alien:// or ccdb:// paths
   try {
@@ -810,27 +854,41 @@ int main(int argc, char* argv[])
   for (const auto& d : art.detectors)
     LOG(info) << d << ' ';
   LOG(info) << "\n  Patterns  : " << art.patterns.size()
-            << "\n  CFM steps : " << art.cfm_steps << "\n\n";
+            << "\n  Sampler   : " << art.cfm_method << "-" << art.cfm_steps
+            << "  (" << art.cfm_steps * (art.cfm_method == "midpoint" ? 2 : 1)
+            << " MLP calls/sample)\n\n";
 
-  // Simulate
+  // Simulate + write in chunks: each chunk is generated, streamed to the ROOT
+  // trees, and freed before the next one starts, so peak memory is bounded by
+  // chunk_size events regardless of the total generation size.
   std::mt19937 rng(seed);
-  LOG(info) << "Simulating " << n_events << " events ...\n";
+  HitWriter writer;
+  try {
+    writer.open(art, out_dir.c_str(), prefix);
+  } catch (const std::exception& e) {
+    LOG(fatal) << "Error opening output files: " << e.what();
+    return 3;
+  }
+
+  LOG(info) << "Simulating " << n_events << " events (chunks of " << chunk_size << ") ...\n";
   auto t0 = std::chrono::steady_clock::now();
-  auto events = simulate(n_events, art, rng);
+  try {
+    for (int done = 0; done < n_events; done += chunk_size) {
+      const int n_chunk = std::min(chunk_size, n_events - done);
+      auto events = simulate(n_chunk, art, rng);
+      writer.fill(events);
+      LOG(info) << "  " << (done + n_chunk) << " / " << n_events << " events written\n";
+    }
+    writer.close();
+  } catch (const std::exception& e) {
+    LOG(fatal) << "Error during simulation/writing: " << e.what();
+    return 3;
+  }
   double elapsed =
     std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
   LOG(info) << "  Done in " << elapsed << " s  ("
             << 1000.0 * elapsed / n_events << " ms/event)\n";
-  print_summary(events, art);
-
-  // Write output
-  LOG(info) << "\nWriting AliceO2 Hits.root files to " << out_dir << " ...\n";
-  try {
-    write_hits(events, art, out_dir.c_str(), prefix);
-  } catch (const std::exception& e) {
-    LOG(fatal) << "Error writing output: " << e.what();
-    return 3;
-  }
+  writer.print_summary(art);
 
   LOG(info) << "  Written:\n";
   for (const auto& det : art.detectors)
