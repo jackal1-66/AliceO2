@@ -39,6 +39,8 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <map>
@@ -106,7 +108,8 @@ struct OrtSession {
 
 // -- All artefacts retrieved from disk
 struct Artefacts {
-  std::vector<std::string> detectors;
+  std::vector<std::string> detectors;     // full ordered list from model_cfg.json (defines the context-vector layout)
+  std::vector<std::string> sim_detectors; // subset selected via --detectors: only these are simulated and written
   int n_ctx{};
   int cfm_steps{};                   // integration steps read from model_cfg.json
   std::string cfm_method{"euler"};   // ODE solver: "euler" or "midpoint" (model_cfg.json)
@@ -151,18 +154,74 @@ static bool key_has(const std::string& key, const std::string& det)
   return false;
 }
 
+// Detector-group aliases usable in --detectors
+// "ALICE2" covers all the currently enabled detectors (Run 3).  
+static const std::map<std::string, std::vector<std::string>> detector_groups = {
+  {"ALICE2", {"FDD", "FT0", "FV0", "ITS", "MFT"}},
+};
+
+// "all" (or an empty string) applies no restriction to the subdetectors.
+static std::vector<std::string> parse_detector_list(std::string s)
+{
+  std::transform(s.begin(), s.end(), s.begin(), ::toupper);
+  if (s.empty() || s == "ALL")
+    return {};
+  std::vector<std::string> out;
+  size_t pos = 0;
+  while (pos <= s.size()) {
+    size_t comma = s.find(',', pos);
+    std::string tok = (comma == std::string::npos) ? s.substr(pos) : s.substr(pos, comma - pos);
+    if (!tok.empty()) {
+      auto grp = detector_groups.find(tok);
+      if (grp != detector_groups.end()) {
+        for (const auto& det : grp->second)
+          if (std::find(out.begin(), out.end(), det) == out.end())
+            out.push_back(det);
+      } else if (std::find(out.begin(), out.end(), tok) == out.end()) {
+        out.push_back(tok);
+      }
+    }
+    if (comma == std::string::npos)
+      break;
+    pos = comma + 1;
+  }
+  return out;
+}
+
 static Ort::Env& ort_env()
 {
   static Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "qedFastSim");
   return env;
 }
 
+// Directory where downloaded ONNX models are stored. When the production CCDB
+// local cache is available (ALICEO2_CCDB_LOCALCACHE) the models go once into 
+// <cache>/QEDFastGen/
+static std::string onnx_cache_dir()
+{
+  const char* cache = std::getenv("ALICEO2_CCDB_LOCALCACHE");
+  if (cache && *cache) {
+    std::string dir = std::string(cache) + "/QEDFastGen/";
+    std::error_code ec;
+    std::filesystem::create_directories(dir, ec);
+    if (!ec)
+      return dir;
+    LOG(warn) << "Cannot create " << dir << " (" << ec.message() << "), ONNX models will go to ./";
+  }
+  return "./";
+}
+
 // -- Download ONNX models listed in models_onnx.json
 // The JSON maps detector names to their source paths, e.g.:
 //   { "FDD": "alien://path/to/cfm_FDD.onnx", "FT0": "ccdb://Users/.../cfm_FT0", ... }
-// Each model is downloaded into <models_dir>/cfm_<DET>.onnx, which is the path
-// that load_artefacts() expects.  Local paths are ignored (nothing to download).
-static void download_models(const std::string& dir)
+// Each model is downloaded into <onnx_dir>/cfm_<DET>.onnx, which is the path
+// that load_artefacts() looks up first.  Local paths are ignored (nothing to
+// download). Only the detectors in `selected` are fetched (empty = all).
+// Models already present in onnx_dir are reused.  Downloading is meant to run
+// as a dedicated single step (--download-models) before any parallel
+// simulation tasks start.
+static void download_models(const std::string& dir, const std::vector<std::string>& selected,
+                            const std::string& onnx_dir)
 {
   const std::string json_path = dir + "models_onnx.json";
   std::ifstream f(json_path);
@@ -176,9 +235,16 @@ static void download_models(const std::string& dir)
   std::vector<Entry> alien_entries, ccdb_entries;
 
   for (const auto& [det, val] : j.items()) {
+    if (!selected.empty() &&
+        std::find(selected.begin(), selected.end(), det) == selected.end())
+      continue; // detector not selected: skip download
     const std::string src = val.get<std::string>();
-    // ONNX files are saved in current folder
-    const std::string local = "cfm_" + det + ".onnx";
+    const std::string local = onnx_dir + "cfm_" + det + ".onnx";
+    std::error_code ec;
+    if (std::filesystem::exists(local, ec) && std::filesystem::file_size(local, ec) > 0) {
+      LOG(info) << "  [cache] " << local << " already present, skipping download\n";
+      continue;
+    }
     if (src.starts_with("alien://"))
       alien_entries.push_back({det, src, local});
     else if (src.starts_with("ccdb://"))
@@ -189,7 +255,18 @@ static void download_models(const std::string& dir)
   if (alien_entries.empty() && ccdb_entries.empty())
     return;
 
-  LOG(info) << "Downloading ONNX models ...\n";
+  LOG(info) << "Downloading ONNX models to " << onnx_dir << " ...\n";
+
+  // interrupted downloads leave only a .part file, never a truncated final file
+  const std::string tmp_suffix = ".part";
+  auto commit = [](const std::string& tmp, const std::string& local) {
+    std::error_code ec;
+    std::filesystem::rename(tmp, local, ec);
+    if (ec) {
+      LOG(fatal) << "Error: Cannot move " << tmp << " to " << local << ": " << ec.message();
+      exit(1);
+    }
+  };
 
   // Alien downloads via TGrid
   if (!alien_entries.empty()) {
@@ -198,14 +275,16 @@ static void download_models(const std::string& dir)
       if (!gGrid) {
         LOG(fatal) << "AliEn connection failed, check token.";
         exit(1);
-      }  
+      }
     }
     for (const auto& e : alien_entries) {
       LOG(info) << "  [alien] " << e.src << " -> " << e.local << "\n";
-      if (!TFile::Cp(e.src.c_str(), e.local.c_str())) {
+      const std::string tmp = e.local + tmp_suffix;
+      if (!TFile::Cp(e.src.c_str(), tmp.c_str())) {
         LOG(fatal) << "Error: Model file " << e.src << " does not exist or failed to copy!";
         exit(1);
-      }  
+      }
+      commit(tmp, e.local);
     }
   }
 
@@ -221,17 +300,22 @@ static void download_models(const std::string& dir)
       if (ccdb_path.find(".onnx") != std::string::npos)
         ccdb_path = ccdb_path.substr(0, ccdb_path.find_last_of('/'));
       LOG(info) << "  [ccdb]  " << ccdb_path << " -> " << e.local << "\n";
-      const std::string local_fname = "cfm_" + e.det + ".onnx";
-      if (!api.retrieveBlob(ccdb_path, "./", filter, ts, false, local_fname.c_str())) {
+      const std::string tmp_fname = "cfm_" + e.det + ".onnx" + tmp_suffix;
+      if (!api.retrieveBlob(ccdb_path, onnx_dir, filter, ts, false, tmp_fname.c_str())) {
         LOG(fatal) << "Error: Failed to retrieve " << ccdb_path << " from CCDB!";
         exit(1);
-      }  
+      }
+      commit(onnx_dir + tmp_fname, e.local);
     }
   }
 }
 
 // -- Load artefacts
-static Artefacts load_artefacts(const std::string& dir, int n_threads)
+// `selected` restricts the simulated detectors (empty = all detectors in
+// model_cfg.json).
+static Artefacts load_artefacts(const std::string& dir, int n_threads,
+                                const std::vector<std::string>& selected,
+                                const std::string& onnx_dir)
 {
   Artefacts art;
 
@@ -257,6 +341,22 @@ static Artefacts load_artefacts(const std::string& dir, int n_threads)
     if (art.cfm_method != "euler" && art.cfm_method != "midpoint") {
       LOG(fatal) << "Unknown sampler method in model_cfg.json: " << art.cfm_method;
       exit(1);
+    }
+    if (selected.empty()) {
+      art.sim_detectors = art.detectors;
+    } else {
+      for (const auto& det : selected)
+        if (std::find(art.detectors.begin(), art.detectors.end(), det) == art.detectors.end()) {
+          std::string avail;
+          for (const auto& d : art.detectors)
+            avail += d + " ";
+          LOG(error) << "Unknown detector '" << det << "' in --detectors (available: " << avail << ")";
+          exit(1);
+        }
+      // keep config order so loops stay deterministic
+      for (const auto& det : art.detectors)
+        if (std::find(selected.begin(), selected.end(), det) != selected.end())
+          art.sim_detectors.push_back(det);
     }
   }
 
@@ -314,9 +414,22 @@ static Artefacts load_artefacts(const std::string& dir, int n_threads)
   opts.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
 
   LOG(info) << "  Loading ONNX sessions:\n";
-  // ONNX files are expected to be in the current folder with names cfm_<DET>.onnx, as ensured by download_models()
-  for (const auto& det : art.detectors) {
-    std::string path = "cfm_" + det + ".onnx";
+  // Models are looked up in the download/cache dir first (where download_models()
+  // puts them), then in the artefact dir (fully local setups), then in the cwd
+  // (legacy behaviour). Only the selected detectors need a session.
+  for (const auto& det : art.sim_detectors) {
+    const std::string fname = "cfm_" + det + ".onnx";
+    std::string path = onnx_dir + fname;
+    if (!std::filesystem::exists(path)) {
+      if (std::filesystem::exists(dir + fname))
+        path = dir + fname;
+      else if (std::filesystem::exists(fname))
+        path = fname;
+      else {
+        LOG(fatal) << "Error: Cannot find " << fname << " in " << onnx_dir << ", " << dir << " or ./";
+        exit(1);
+      }
+    }
     OrtSession os;
     os.session = std::make_unique<Ort::Session>(ort_env(), path.c_str(), opts);
     for (size_t i = 0; i < os.session->GetInputCount(); ++i) {
@@ -345,7 +458,8 @@ using Event = std::map<std::string, std::vector<std::vector<float>>>;
 
 static std::vector<Event> simulate(int n_events, const Artefacts& art, std::mt19937& rng)
 {
-  const auto& dets = art.detectors;
+  const auto& dets = art.detectors;         // full list: defines the context-vector layout
+  const auto& sim_dets = art.sim_detectors; // only these are sampled and returned
 
   // Stage 1: sample coincidence pattern for every event
   // std::discrete_distribution is a random number distribution that produces integers on the interval [0, n) according to the discrete probability distribution defined by the provided weights (probs).
@@ -379,7 +493,7 @@ static std::vector<Event> simulate(int n_events, const Artefacts& art, std::mt19
       continue; // empty pattern – no hits for any detector
     std::string pkey = make_key(pat);
 
-    for (const auto& det : dets) {
+    for (const auto& det : sim_dets) {
       bool active = std::find(pat.begin(), pat.end(), det) != pat.end();
       if (!active || !art.sessions.count(det))
         continue;
@@ -426,7 +540,7 @@ static std::vector<Event> simulate(int n_events, const Artefacts& art, std::mt19
   std::map<std::string, std::map<int, std::vector<std::vector<float>>>> all_hits;
   Ort::MemoryInfo mem_info = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
 
-  for (const auto& det : dets) {
+  for (const auto& det : sim_dets) {
     if (!det_entries.count(det) || det_entries.at(det).empty())
       continue;
 
@@ -530,7 +644,7 @@ static std::vector<Event> simulate(int n_events, const Artefacts& art, std::mt19
   // Assemble per-event result maps
   std::vector<Event> results(n_events);
   for (int i = 0; i < n_events; ++i)
-    for (const auto& det : dets)
+    for (const auto& det : sim_dets)
       if (all_hits.count(det) && all_hits.at(det).count(i))
         results[i][det] = std::move(all_hits[det][i]);
 
@@ -624,11 +738,11 @@ struct HitWriter {
       return {f, t};
     };
 
-    has_fdd = std::count(art.detectors.begin(), art.detectors.end(), "FDD");
-    has_ft0 = std::count(art.detectors.begin(), art.detectors.end(), "FT0");
-    has_fv0 = std::count(art.detectors.begin(), art.detectors.end(), "FV0");
-    has_its = std::count(art.detectors.begin(), art.detectors.end(), "ITS");
-    has_mft = std::count(art.detectors.begin(), art.detectors.end(), "MFT");
+    has_fdd = std::count(art.sim_detectors.begin(), art.sim_detectors.end(), "FDD");
+    has_ft0 = std::count(art.sim_detectors.begin(), art.sim_detectors.end(), "FT0");
+    has_fv0 = std::count(art.sim_detectors.begin(), art.sim_detectors.end(), "FV0");
+    has_its = std::count(art.sim_detectors.begin(), art.sim_detectors.end(), "ITS");
+    has_mft = std::count(art.sim_detectors.begin(), art.sim_detectors.end(), "MFT");
 
     if (has_fdd) {
       std::tie(fdd_file, fdd_tree) = open_file(out_dir + prefix + "_HitsFDD.root");
@@ -756,7 +870,7 @@ struct HitWriter {
   void print_summary(const Artefacts& art) const
   {
     LOG(info) << "\n  Per-detector statistics:\n";
-    for (const auto& det : art.detectors) {
+    for (const auto& det : art.sim_detectors) {
       LOG(info) << "    " << det
                 << "  active_events=" << (n_active.count(det) ? n_active.at(det) : 0)
                 << "/" << n_events_total
@@ -770,19 +884,22 @@ namespace bpo = boost::program_options;
 
 int main(int argc, char* argv[])
 {
-  const int hw = static_cast<int>(std::thread::hardware_concurrency());
-  const int default_threads = std::max(1, std::min(8, hw));
+  // Single-thread by default: ONNX inference is fast enough per timeframe and
+  // a 1-core task schedules better in full O2DPG workflows; use -j to raise it.
+  const int default_threads = 1;
 
   bpo::options_description options("qedFastSimCFM options");
   options.add_options()
     ("models-dir,m", bpo::value<std::string>()->default_value("${O2_ROOT}/share/Generators/QEDFastGen"),
                                                                         "directory with CFM artefacts from fastsim_cfm.ipynb")
-    ("nevents,n",    bpo::value<int>()->required(),                     "number of events to simulate")
+    ("nevents,n",    bpo::value<int>(),                                 "number of events to simulate (required unless --download-models)")
     ("output-dir,o", bpo::value<std::string>()->default_value("./"),    "directory where Hits.root files are written")
     ("prefix,p",     bpo::value<std::string>()->default_value("qed"), "file-name prefix")
     ("seed,s",       bpo::value<uint32_t>()->default_value(42u),        "RNG seed")
-    ("threads,j",    bpo::value<int>()->default_value(default_threads), "ORT intra/inter-op thread count")
+    ("threads,j",    bpo::value<int>()->default_value(default_threads), "ORT intra/inter-op thread count (default 1 = single-thread)")
     ("chunk,c",      bpo::value<int>()->default_value(20000),           "events simulated and written per chunk (bounds peak memory)")
+    ("detectors,d",  bpo::value<std::string>()->default_value("ALICE2"),   "comma-separated detectors to simulate (e.g. FT0,ITS), a group alias (ALICE2), or 'all'")
+    ("download-models", "download the ONNX models into the cache directory and exit; run this once before starting (parallel) simulation tasks")
     ("help,h",       "produce help message");
 
   bpo::variables_map vm;
@@ -798,6 +915,13 @@ int main(int argc, char* argv[])
     bpo::notify(vm);
   } catch (const bpo::error& e) {
     LOG(fatal) << "Error parsing command-line arguments: " << e.what() << "\n\n" << options;
+    return 1;
+  }
+
+  const bool download_only = vm.count("download-models") > 0;
+  if (!download_only && !vm.count("nevents")) {
+    LOG(error) << "Missing required option --nevents (-n)\n\n";
+    std::cerr << options;
     return 1;
   }
 
@@ -817,41 +941,57 @@ int main(int argc, char* argv[])
   };
 
   const std::string models_dir = expand(ensure_slash(vm["models-dir"].as<std::string>()));
-  const int n_events            = vm["nevents"].as<int>();
+  const int n_events            = download_only ? 0 : vm["nevents"].as<int>();
   const std::string out_dir    = expand(ensure_slash(vm["output-dir"].as<std::string>()));
   const std::string prefix      = vm["prefix"].as<std::string>();
   const uint32_t seed           = vm["seed"].as<uint32_t>();
   const int n_threads           = std::max(1, vm["threads"].as<int>());
   const int chunk_size          = std::max(1, vm["chunk"].as<int>());
+  const auto selected_dets      = parse_detector_list(vm["detectors"].as<std::string>());
+  const std::string onnx_dir    = onnx_cache_dir();
 
   LOG(info) << "qedFastSimCFM - QED Conditional Flow Matching to AliceO2 Hits\n"
             << "  models_dir : " << models_dir << '\n'
+            << "  onnx_cache : " << onnx_dir << '\n'
             << "  n_events   : " << n_events << '\n'
             << "  output_dir : " << out_dir << '\n'
             << "  prefix     : " << prefix << '\n'
             << "  seed       : " << seed << '\n'
             << "  threads    : " << n_threads << '\n'
-            << "  chunk      : " << chunk_size << "\n\n";
+            << "  chunk      : " << chunk_size << '\n'
+            << "  detectors  : " << vm["detectors"].as<std::string>() << "\n\n";
 
   // Download ONNX models if models_onnx.json specifies alien:// or ccdb:// paths
   try {
-    download_models(models_dir.c_str());
+    download_models(models_dir.c_str(), selected_dets, onnx_dir);
   } catch (const std::exception& e) {
     LOG(fatal) << "Error downloading models: " << e.what();
     return 2;
+  }
+
+  if (download_only) {
+    // dedicated download step (e.g. the O2DPG qedmodeldownload task)
+    LOG(info) << "Models available in " << onnx_dir << ":\n";
+    if (selected_dets.empty()) {
+      LOG(info) << "  (all detectors listed in models_onnx.json)\n";
+    } else {
+      for (const auto& det : selected_dets)
+        LOG(info) << "  cfm_" << det << ".onnx\n";
+    }
+    return 0;
   }
 
   // Load artefacts
   LOG(info) << "Loading artefacts ...\n";
   Artefacts art;
   try {
-    art = load_artefacts(models_dir.c_str(), n_threads);
+    art = load_artefacts(models_dir.c_str(), n_threads, selected_dets, onnx_dir);
   } catch (const std::exception& e) {
     LOG(fatal) << "Error loading artefacts: " << e.what();
     return 2;
   }
   LOG(info) << "  Detectors : ";
-  for (const auto& d : art.detectors)
+  for (const auto& d : art.sim_detectors)
     LOG(info) << d << ' ';
   LOG(info) << "\n  Patterns  : " << art.patterns.size()
             << "\n  Sampler   : " << art.cfm_method << "-" << art.cfm_steps
@@ -891,7 +1031,7 @@ int main(int argc, char* argv[])
   writer.print_summary(art);
 
   LOG(info) << "  Written:\n";
-  for (const auto& det : art.detectors)
+  for (const auto& det : art.sim_detectors)
     LOG(info) << "    " << out_dir << prefix << "_Hits" << det << ".root\n";
 
   return 0;
