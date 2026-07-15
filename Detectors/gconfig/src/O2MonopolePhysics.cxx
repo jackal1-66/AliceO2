@@ -103,7 +103,7 @@ class O2MonopolePhysics : public G4VUserPhysicsList
         continue;
       }
       // The reference EM physics list attaches the standard hadron ionisation
-      // (hIoni) to the monopole, which is wrong and makes G4LossTableManager crash 
+      // (hIoni) to the monopole, which is wrong and makes G4LossTableManager crash
       // while merging the two dE/dx tables.
       // Any pre-existing energy-loss process is removed so that mplIoni is the
       // monopole single, correct ionisation process. This is taken from Geant4

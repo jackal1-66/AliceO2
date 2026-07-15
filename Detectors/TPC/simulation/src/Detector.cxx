@@ -117,7 +117,7 @@ Bool_t Detector::ProcessHits(FairVolume* vol)
   const int trackPdg = fMC->TrackPid();
   const bool isMonopole = (TMath::Abs(trackPdg) == 4110000 || TMath::Abs(trackPdg) == 4120000);
   if (static_cast<int>(trackCharge) == 0) {
-    // Fall through only for monopoles when ionisation is enabled. 
+    // Fall through only for monopoles when ionisation is enabled.
     // The behaviour for the other neutral particles remains as before.
     if (!isMonopole || fMC->Edep() <= 0.) {
       // set a very large step size for neutral particles
@@ -215,7 +215,7 @@ Bool_t Detector::ProcessHits(FairVolume* vol)
   if (isMonopole) {
     // ---| MONOPOLE IONISATION |--------
     // A magnetic monopole ionises the gas via G4mplIonisation (Ahlen stopping
-    // power), which is not described by the electric-charge model (no e-charge) 
+    // power), which is not described by the electric-charge model (no e-charge)
     // Ionisation electrons calculated directly from the energy deposited in this step: Nel = Edep / Wion.
     // To check by TPC experts if this is actually the best way...
     numberOfElectrons = static_cast<int>(fMC->Edep() / static_cast<double>(gasParam.Wion));
