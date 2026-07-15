@@ -54,6 +54,16 @@ struct G4Params : public o2::conf::ConfigurableParamHelper<G4Params> {
 
   bool g4scoring = false;
   bool g4fluenceweight = false;
+
+  // Opt-in magnetic-monopole ionisation (see Detectors/gconfig/O2MonopolePhysics).
+  // When true, the G4mplIonisation process (Ahlen stopping power) is attached to
+  // the O2 monopole particles (PDG +-4110000 / +-4120000) on top of the chosen
+  // reference physics list. Off by default: no effect on any existing run.
+  bool monopole = false;
+  // Monopole magnetic charge in units of the Dirac charge g_D = eplus/(2*alpha)
+  // (~68.5 eplus). 1.0 corresponds to a single classic Dirac monopole.
+  float monopoleMagneticCharge = 1.f;
+
   O2ParamDef(G4Params, "G4");
 };
 
