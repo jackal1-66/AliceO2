@@ -110,7 +110,7 @@ inline double tpcDriftFieldMagnitude()
     return valueKVPerCm * CLHEP::kilovolt / CLHEP::cm;
   } catch (...) {
     LOG(warn) << "O2MonopolePhysics: the TPC is in the geometry but TPCGEMParam is not "
-                    "registered; no drift-field coupling for the monopole";
+                 "registered; no drift-field coupling for the monopole";
     return 0.;
   }
 }
@@ -212,7 +212,7 @@ class O2MonopoleEquation : public G4EquationOfMotion
       }
     }
 
-    dydx[6] = 0.;                                      // not used
+    dydx[6] = 0.;                                       // not used
     dydx[7] = energy * pModuleInverse / CLHEP::c_light; // inverse velocity
   }
 
@@ -227,7 +227,7 @@ class O2MonopoleEquation : public G4EquationOfMotion
     return trackingManager != nullptr ? trackingManager->GetTrack() : nullptr;
   }
 
-  double mMagneticChargeEplus; ///< |g| in eplus units (1 g_D = 1/(2*alpha) ~ 68.5)
+  double mMagneticChargeEplus;  ///< |g| in eplus units (1 g_D = 1/(2*alpha) ~ 68.5)
   G4double mTPCDriftField = 0.; ///< TPC drift field, Geant4 units; 0 disables the coupling
   G4double mElCharge = 0.;
   G4double mMagCharge = 0.;
