@@ -136,9 +136,9 @@ namespace
 //
 // No cut is applied on z because loopers spiral the field lines and a vertex as far as |z| = 283 cm
 // feeds hits into the gas. A cut here would discard loopers that produce TPC signals.
-constexpr double kFcLxIn = 82.428409;         // cm, inner field cage strips
-constexpr double kRodROut = 254.25 + 2.2;     // cm, outer field cage rods plus their radial size
-constexpr double kLooperRadialReach = 10.;    // cm, margin for the helix sweep
+constexpr double kFcLxIn = 82.428409;      // cm, inner field cage strips
+constexpr double kRodROut = 254.25 + 2.2;  // cm, outer field cage rods plus their radial size
+constexpr double kLooperRadialReach = 10.; // cm, margin for the helix sweep
 constexpr double kTPCActiveRMin = kFcLxIn - kLooperRadialReach;
 constexpr double kTPCActiveRMax = kRodROut + kLooperRadialReach;
 } // namespace
@@ -154,7 +154,7 @@ void GenTPCLoopers::setGeomProtection(bool protect)
   mGeomProtection = protect;
   if (mGeomProtection) {
     LOG(debug) << "TPC loopers geometrical protection: ON (accepting vertices with "
-              << kTPCActiveRMin << " <= Vt <= " << kTPCActiveRMax << " cm)";
+               << kTPCActiveRMin << " <= Vt <= " << kTPCActiveRMax << " cm)";
   } else {
     LOG(warning) << "TPC loopers geometrical protection: OFF - loopers will be generated outside the TPC active volume as well.";
   }
