@@ -13,6 +13,7 @@
 /// \brief Standalone generator for QED processes using a fast simulation approach based on ONNX models.
 
 #include <onnxruntime_cxx_api.h>
+#include <onnxruntime_session_options_config_keys.h>
 #include <nlohmann/json.hpp>
 
 // ROOT
@@ -188,6 +189,15 @@ static std::vector<std::string> parse_detector_list(std::string s)
   return out;
 }
 
+// Upper bound on the number of hit rows handed to ONNX Runtime in one Run(),
+// to keep memory usage limited and avoid spinning idle threads in the per-session intra-op pools
+static constexpr int kOrtBatchRows = 1024;
+
+// NOTE: this cannot use ONNX Runtime's global thread pools. Currently the ORT
+// environment is a process-wide singleton and libO2Generators.so already
+// constructs one before main() (`global_env` in TPCLoopers.cxx).
+// The per-session pools are kept and made harmless in load_artefacts() instead.
+// To-do: make global_env a function-local static behind an accessor
 static Ort::Env& ort_env()
 {
   static Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "qedFastSim");
@@ -410,7 +420,15 @@ static Artefacts load_artefacts(const std::string& dir, int n_threads,
   // ONNX sessions
   Ort::SessionOptions opts;
   opts.SetIntraOpNumThreads(n_threads);
-  opts.SetInterOpNumThreads(n_threads);
+  // One intra-op pool per detector session is unavoidable here.
+  // Since the five detectors are sampled one after the other,
+  // four of the five pools are always idle. Parking idle threads
+  // instead of spinning keeps "-j N" to about N *busy* threads
+  opts.AddConfigEntry(kOrtSessionOptionsConfigAllowIntraOpSpinning, "0");
+  opts.AddConfigEntry(kOrtSessionOptionsConfigAllowInterOpSpinning, "0");
+  // The model is a plain sequential MLP: there is no node-level parallelism to
+  // exploit, so a wider inter-op pool is just overhead.
+  opts.SetInterOpNumThreads(1);
   opts.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
 
   LOG(info) << "  Loading ONNX sessions:\n";
@@ -568,60 +586,74 @@ static std::vector<Event> simulate(int n_events, const Artefacts& art, std::mt19
       }
     }
 
-    std::vector<float> t_vec(total);
-
-    std::array<int64_t, 2> x_shape{total, n_feat};
-    std::array<int64_t, 1> t_shape{total};
-    std::array<int64_t, 2> c_shape{total, art.n_ctx};
-
-    // One velocity evaluation: returns Run() output holding v(x_in, t_scalar, ctx).
-    auto eval_velocity = [&](std::vector<float>& x_in, float t_scalar) {
-      std::fill(t_vec.begin(), t_vec.end(), t_scalar);
-
-      Ort::Value x_tensor = Ort::Value::CreateTensor<float>(
-        mem_info, x_in.data(), static_cast<size_t>(total * n_feat),
-        x_shape.data(), x_shape.size());
-      Ort::Value t_tensor = Ort::Value::CreateTensor<float>(
-        mem_info, t_vec.data(), static_cast<size_t>(total),
-        t_shape.data(), t_shape.size());
-      Ort::Value c_tensor = Ort::Value::CreateTensor<float>(
-        mem_info, ctx_data.data(), static_cast<size_t>(total * art.n_ctx),
-        c_shape.data(), c_shape.size());
-
-      std::vector<Ort::Value> inputs;
-      inputs.push_back(std::move(x_tensor));
-      inputs.push_back(std::move(t_tensor));
-      inputs.push_back(std::move(c_tensor));
-
-      return os.session->Run(
-        Ort::RunOptions{nullptr},
-        os.input_names.data(), inputs.data(), inputs.size(),
-        os.output_names.data(), os.output_names.size());
-    };
-
-    const int sz = total * n_feat;
+    // t_vec / x_half are reused across evaluations and slices
+    std::vector<float> t_vec;
     std::vector<float> x_half;
-    if (use_midpoint)
-      x_half.resize(sz);
 
-    for (int step = 0; step < art.cfm_steps; ++step) {
-      const float t0 = step * dt;
-      if (use_midpoint) {
-        // k1 = v(x, t);  x += dt * v(x + dt/2*k1, t + dt/2)
-        auto out1 = eval_velocity(x_data, t0);
-        const float* k1 = out1[0].GetTensorData<float>();
-        for (int k = 0; k < sz; ++k)
-          x_half[k] = x_data[k] + 0.5f * dt * k1[k];
-        auto out2 = eval_velocity(x_half, t0 + 0.5f * dt);
-        const float* v2 = out2[0].GetTensorData<float>();
-        for (int k = 0; k < sz; ++k)
-          x_data[k] += dt * v2[k];
-      } else {
-        // x += dt * v(x, t)
-        auto out = eval_velocity(x_data, t0);
-        const float* vel = out[0].GetTensorData<float>();
-        for (int k = 0; k < sz; ++k)
-          x_data[k] += vel[k] * dt;
+    // ONNX Runtime sizes the MLP activations to the batch it is handed, which caused
+    // memory usage to peak badly. The rows are independent, so integrate them in
+    // slices of at most kOrtBatchRows hits: identical arithmetic per row (the
+    // output is bit-identical), bounded memory, and the smaller working set
+    // also stays in cache, which makes it about 2x faster.
+    for (int row0 = 0; row0 < total; row0 += kOrtBatchRows) {
+      const int nrows = std::min(kOrtBatchRows, total - row0);
+      const int sz = nrows * n_feat;
+
+      float* x_slice = x_data.data() + static_cast<size_t>(row0) * n_feat;
+      float* ctx_slice = ctx_data.data() + static_cast<size_t>(row0) * art.n_ctx;
+
+      t_vec.resize(nrows);
+      std::array<int64_t, 2> x_shape{nrows, n_feat};
+      std::array<int64_t, 1> t_shape{nrows};
+      std::array<int64_t, 2> c_shape{nrows, art.n_ctx};
+
+      // One velocity evaluation: returns Run() output holding v(x_in, t_scalar, ctx).
+      auto eval_velocity = [&](float* x_in, float t_scalar) {
+        std::fill(t_vec.begin(), t_vec.end(), t_scalar);
+
+        Ort::Value x_tensor = Ort::Value::CreateTensor<float>(
+          mem_info, x_in, static_cast<size_t>(sz),
+          x_shape.data(), x_shape.size());
+        Ort::Value t_tensor = Ort::Value::CreateTensor<float>(
+          mem_info, t_vec.data(), static_cast<size_t>(nrows),
+          t_shape.data(), t_shape.size());
+        Ort::Value c_tensor = Ort::Value::CreateTensor<float>(
+          mem_info, ctx_slice, static_cast<size_t>(nrows) * art.n_ctx,
+          c_shape.data(), c_shape.size());
+
+        std::vector<Ort::Value> inputs;
+        inputs.push_back(std::move(x_tensor));
+        inputs.push_back(std::move(t_tensor));
+        inputs.push_back(std::move(c_tensor));
+
+        return os.session->Run(
+          Ort::RunOptions{nullptr},
+          os.input_names.data(), inputs.data(), inputs.size(),
+          os.output_names.data(), os.output_names.size());
+      };
+
+      if (use_midpoint)
+        x_half.resize(sz);
+
+      for (int step = 0; step < art.cfm_steps; ++step) {
+        const float t0 = step * dt;
+        if (use_midpoint) {
+          // k1 = v(x, t);  x += dt * v(x + dt/2*k1, t + dt/2)
+          auto out1 = eval_velocity(x_slice, t0);
+          const float* k1 = out1[0].GetTensorData<float>();
+          for (int k = 0; k < sz; ++k)
+            x_half[k] = x_slice[k] + 0.5f * dt * k1[k];
+          auto out2 = eval_velocity(x_half.data(), t0 + 0.5f * dt);
+          const float* v2 = out2[0].GetTensorData<float>();
+          for (int k = 0; k < sz; ++k)
+            x_slice[k] += dt * v2[k];
+        } else {
+          // x += dt * v(x, t)
+          auto out = eval_velocity(x_slice, t0);
+          const float* vel = out[0].GetTensorData<float>();
+          for (int k = 0; k < sz; ++k)
+            x_slice[k] += vel[k] * dt;
+        }
       }
     }
 
@@ -896,7 +928,7 @@ int main(int argc, char* argv[])
     ("output-dir,o", bpo::value<std::string>()->default_value("./"),    "directory where Hits.root files are written")
     ("prefix,p",     bpo::value<std::string>()->default_value("qed"), "file-name prefix")
     ("seed,s",       bpo::value<uint32_t>()->default_value(42u),        "RNG seed")
-    ("threads,j",    bpo::value<int>()->default_value(default_threads), "ORT intra/inter-op thread count (default 1 = single-thread)")
+    ("threads,j",    bpo::value<int>()->default_value(default_threads), "ONNX Runtime intra-op threads; -j N really uses N threads (default 1)")
     ("chunk,c",      bpo::value<int>()->default_value(20000),           "events simulated and written per chunk (bounds peak memory)")
     ("detectors,d",  bpo::value<std::string>()->default_value("ALICE2"),   "comma-separated detectors to simulate (e.g. FT0,ITS), a group alias (ALICE2), or 'all'")
     ("download-models", "download the ONNX models into the cache directory and exit; run this once before starting (parallel) simulation tasks")
