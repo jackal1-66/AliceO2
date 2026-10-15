@@ -16,12 +16,14 @@
 #include "Steer/MCKinematicsReader.h"
 
 #include "Framework/runDataProcessing.h"
+#include <TGrid.h>
 
 using namespace o2::framework;
 using namespace o2::steer;
 
 struct O2simKinePublisher {
-  Configurable<std::string> kineFileName{"kineFileName", "o2sim", "name of the _Kine.root file (without '_Kine.root')"};
+  Configurable<std::string> kineFileName{"kineFileName", "o2sim", "name of the _Kine.root file (without '_Kine.root', unless --nosuffix is used). Can be an alien:// path"};
+  Configurable<bool> noSuffix{"nosuffix", false, "Do not append '_Kine.root' to kineFileName, which is then used as the full file name (e.g. evtpool.root)"};
   Configurable<int> aggregate{"aggregate-timeframe", 300, "Number of events to put in a timeframe"};
 
   int nEvents = 0;
@@ -31,7 +33,14 @@ struct O2simKinePublisher {
 
   void init(o2::framework::InitContext& /*ic*/)
   {
-    if (mcKinReader->initFromKinematics((std::string)kineFileName)) {
+    const std::string fileName = kineFileName;
+    if (fileName.starts_with("alien://") && !gGrid) {
+      TGrid::Connect("alien://");
+      if (!gGrid) {
+        LOG(fatal) << "AliEn connection failed, check token.";
+      }
+    }
+    if (mcKinReader->initFromKinematics(fileName, !noSuffix)) {
       nEvents = mcKinReader->getNEvents(0);
     } else {
       LOGP(fatal, "Cannot open kine file {}", (std::string)kineFileName);

@@ -224,14 +224,15 @@ bool MCKinematicsReader::initFromDigitContext(std::string_view name)
   return initFromDigitContext(context);
 }
 
-bool MCKinematicsReader::initFromKinematics(std::string_view name)
+bool MCKinematicsReader::initFromKinematics(std::string_view name, bool addKineSuffix)
 {
   if (mInitialized) {
     LOG(info) << "MCKinematicsReader already initialized; doing nothing";
     return false;
   }
+  const std::string filename = addKineSuffix ? o2::base::NameConf::getMCKinematicsFileName(name.data()) : std::string(name);
   mInputChains.emplace_back(new TChain("o2sim"));
-  mInputChains.back()->AddFile(o2::base::NameConf::getMCKinematicsFileName(name.data()).c_str());
+  mInputChains.back()->AddFile(filename.c_str());
   mTracks.resize(1);
   mHeaders.resize(1);
   mIndexedTrackRefs.resize(1);

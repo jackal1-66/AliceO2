@@ -72,7 +72,9 @@ class MCKinematicsReader
   bool initFromDigitContext(o2::steer::DigitizationContext const* digicontext);
 
   /// inits the reader from a simple kinematics file
-  bool initFromKinematics(std::string_view filename);
+  /// By default name is the prefix of the <name>_Kine.root file,
+  /// otherwise, with addKineSuffix == false, it is the full file name (e.g. evtpool.root)
+  bool initFromKinematics(std::string_view filename, bool addKineSuffix = true);
 
   bool isInitialized() const { return mInitialized; }
 

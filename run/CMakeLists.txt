@@ -132,7 +132,7 @@ o2_add_executable(mctracks-proxy
 o2_add_executable(kine-publisher
                   COMPONENT_NAME sim
                   SOURCES o2sim_kine_publisher.cxx
-                  PUBLIC_LINK_LIBRARIES O2::Framework O2::SimulationDataFormat O2::Steer)
+                  PUBLIC_LINK_LIBRARIES O2::Framework O2::SimulationDataFormat O2::Steer ROOT::Net)
 
 o2_add_executable(dpl-eventgen
                   COMPONENT_NAME sim
